@@ -1,0 +1,878 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <script src="../gate.js" data-lock="1"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>발로 밟기 게임</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+  <style>
+    body {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Noto Sans KR', sans-serif;
+      overflow: hidden;
+    }
+
+    html, body, #game-container {
+      height: 100%;
+      width: 100%;
+    }
+
+    #game-container {
+      position: relative;
+      background: #000000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #video {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 1;
+      z-index: 1;
+      transform: scaleX(-1);
+    }
+
+    #canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 2;
+      pointer-events: none;
+      transform: scaleX(-1);
+    }
+
+    #baseline {
+      position: absolute;
+      top: 80%;
+      left: 0;
+      width: 100%;
+      height: 80px;
+      transform: translateY(-50%);
+      border-top: 3px dashed rgba(255, 255, 255, 0.6);
+      border-bottom: 3px dashed rgba(255, 255, 255, 0.6);
+      background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0) 100%);
+      z-index: 2;
+      pointer-events: none;
+      display: none;
+    }
+
+    .ui-layer {
+      position: relative;
+      z-index: 3;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #setup-screen, #game-screen {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #setup-screen {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+
+    #game-screen {
+      display: none;
+    }
+
+    .title {
+      font-size: 48px;
+      font-weight: bold;
+      color: white;
+      margin-bottom: 30px;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }
+
+    .camera-select {
+      margin-bottom: 20px;
+    }
+
+    .camera-select label {
+      color: white;
+      font-size: 18px;
+      margin-right: 10px;
+      font-weight: 600;
+    }
+
+    .camera-select select {
+      padding: 10px 20px;
+      font-size: 16px;
+      border-radius: 8px;
+      border: none;
+      background: white;
+      cursor: pointer;
+    }
+
+    .start-button {
+      padding: 15px 40px;
+      font-size: 24px;
+      font-weight: bold;
+      color: white;
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+      border: none;
+      border-radius: 50px;
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+      transition: transform 0.2s;
+    }
+
+    .start-button:hover {
+      transform: scale(1.05);
+    }
+
+    .start-button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: scale(1);
+    }
+
+    #countdown {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 120px;
+      font-weight: bold;
+      color: white;
+      text-shadow: 4px 4px 8px rgba(0,0,0,0.5);
+      display: none;
+    }
+
+    #score-board {
+      position: absolute;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(255,255,255,0.9);
+      padding: 15px 30px;
+      border-radius: 20px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+      display: flex;
+      gap: 30px;
+      align-items: center;
+    }
+
+    #score, #timer {
+      font-size: 32px;
+      font-weight: bold;
+      color: #667eea;
+      margin: 0;
+    }
+
+    #high-score-board {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: rgba(255,215,0,0.9);
+      padding: 10px 20px;
+      border-radius: 15px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+
+    #high-score {
+      font-size: 24px;
+      font-weight: bold;
+      color: #d97706;
+      margin: 0;
+    }
+
+    #reset-button, #stop-button {
+      position: absolute;
+      bottom: 30px;
+      padding: 12px 30px;
+      font-size: 20px;
+      font-weight: bold;
+      color: white;
+      background: rgba(239, 68, 68, 0.9);
+      border: none;
+      border-radius: 25px;
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+      transition: transform 0.2s;
+      display: none;
+    }
+
+    #reset-button {
+      left: 50%;
+      transform: translateX(-50%);
+    }
+    #reset-button:hover {
+      transform: translateX(-50%) scale(1.05);
+    }
+
+    #stop-button {
+      left: 30px;
+    }
+    #stop-button:hover {
+      transform: scale(1.05);
+    }
+
+    .game-over-message {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(255,255,255,0.95);
+      padding: 40px 60px;
+      border-radius: 30px;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+      text-align: center;
+      display: none;
+      z-index: 1000;
+    }
+
+    .game-over-message h2 {
+      font-size: 48px;
+      color: #667eea;
+      margin: 0 0 20px 0;
+    }
+
+    .game-over-message p {
+      font-size: 32px;
+      color: #333;
+      margin: 10px 0;
+    }
+
+    .instruction {
+      color: white;
+      font-size: 20px;
+      margin-top: 30px;
+      text-align: center;
+      line-height: 1.6;
+      max-width: 600px;
+      background: rgba(0,0,0,0.3);
+      padding: 20px 30px;
+      border-radius: 15px;
+    }
+
+    .block {
+      position: absolute;
+      width: 80px;
+      height: 80px;
+      border-radius: 12px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+      transition: background 0.2s, box-shadow 0.2s;
+      z-index: 3;
+    }
+
+    .block.normal {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+
+    .block.active {
+      background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+      box-shadow: 0 0 30px rgba(251, 191, 36, 0.8);
+      animation: pulse 0.5s ease-in-out infinite;
+    }
+
+    .block.hit-animation {
+      animation: blockExplode 0.4s ease-out forwards !important;
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: translate(-50%, -50%) scale(1); }
+      50% { transform: translate(-50%, -50%) scale(1.1); }
+    }
+
+    @keyframes blockExplode {
+      0% { transform: translate(-50%, -50%) scale(1); opacity: 1; box-shadow: 0 0 30px rgba(251, 191, 36, 0.8); }
+      50% { transform: translate(-50%, -50%) scale(1.5); opacity: 0.8; box-shadow: 0 0 60px rgba(251, 191, 36, 1), 0 0 100px rgba(251, 191, 36, 0.6); }
+      100% { transform: translate(-50%, -50%) scale(2); opacity: 0; box-shadow: 0 0 80px rgba(251, 191, 36, 0); }
+    }
+
+    .success-indicator {
+      position: absolute;
+      font-weight: bold;
+      text-align: center;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+      animation: successFloat 1s ease-out forwards;
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    @keyframes successFloat {
+      0% { transform: translate(-50%, -50%) scale(0.5); opacity: 1; }
+      30% { transform: translate(-50%, -80%) scale(1.2); opacity: 1; }
+      100% { transform: translate(-50%, -150%) scale(1); opacity: 0; }
+    }
+
+    .loading-text {
+      color: white;
+      font-size: 18px;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+   <video id="video" autoplay playsinline></video>
+   <canvas id="canvas"></canvas>
+   
+   <div id="baseline"></div>
+   
+   <div class="ui-layer">
+    <div id="setup-screen">
+     <h1 class="title" id="game-title">발로 밟기 게임</h1>
+     <div class="camera-select">
+         <label for="camera-selector">카메라 선택:</label> 
+         <select id="camera-selector"></select>
+     </div>
+     <button class="start-button" id="start-button" disabled>로딩 중...</button>
+     <p class="loading-text" id="loading-text">MoveNet 모델 로딩 중...</p>
+     <p class="loading-text" id="camera-error" style="display:none; background:rgba(220,38,38,0.85); padding:10px 16px; border-radius:10px; max-width:600px;"></p>
+     <div class="instruction">
+       🔵 블럭이 위에서 내려옵니다<br>
+       👟 하단 기준선에 맞춰 양발로 정확히 밟아주세요!<br>
+       ✨ 완벽하게 맞출수록 점수가 높고, 놓치면 감점됩니다.<br>
+       ⌨️ (게임 중 ESC 키를 누르면 처음으로 돌아갑니다)
+     </div>
+    </div>
+    <div id="game-screen">
+     <div id="score-board">
+      <p id="score">점수: 0</p>
+      <p id="timer">2:00</p>
+     </div>
+     <div id="high-score-board">
+      <p id="high-score">최고: 0</p>
+     </div>
+     <div id="countdown"></div>
+     <div class="game-over-message" id="game-over">
+      <h2>게임 종료!</h2>
+      <p id="final-score">최종 점수: 0</p>
+      <p id="high-score-message"></p>
+     </div>
+     <button id="reset-button">다시 하기</button> 
+     <button id="stop-button">게임 중지</button>
+    </div>
+   </div>
+  </div>
+  <script>
+    let detector = null;
+    let video = null;
+    let canvas = null;
+    let ctx = null;
+    let animationId = null;
+    let gameState = 'setup';
+    let score = 0;
+    let highScore = 0;
+    let blocks = [];
+    let blockSpeed = 2;
+    let lastBlockTime = 0;
+    let blockInterval = 2000;
+    let timerInterval = null;
+    let remainingTime = 120;
+
+    const BLOCK_POSITIONS = [0.35, 0.45, 0.55, 0.65];
+    const BASELINE_Y = 0.80; 
+    const GAME_DURATION = 120;
+    const SPEED_MULTIPLIER = 1.2; // 🚀 속도 조절 변수 (1.2배)
+
+    let sharedAudio = null;
+    function playBeep(frequency, duration, type = 'sine') {
+      if (!sharedAudio) sharedAudio = new (window.AudioContext || window.webkitAudioContext)();
+      const audioContext = sharedAudio;
+      if (audioContext.state === 'suspended') audioContext.resume();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.value = frequency;
+      oscillator.type = type;
+      
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + duration);
+    }
+
+    async function init() {
+      video = document.getElementById('video');
+      canvas = document.getElementById('canvas');
+      ctx = canvas.getContext('2d');
+
+      try {
+        await loadCameras();
+      } catch (error) {
+        console.error('카메라 오류:', error);
+        showCameraError(error);
+      }
+      await loadModel();
+      
+      document.getElementById('start-button').addEventListener('click', startGame);
+      document.getElementById('reset-button').addEventListener('click', resetGame);
+      document.getElementById('stop-button').addEventListener('click', stopGame);
+      
+      // ESC 키 입력 시 게임 초기화
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' || e.key === 'Esc') {
+          if (gameState !== 'setup') {
+            resetGame();
+          }
+        }
+      });
+      
+      const savedHighScore = localStorage.getItem('footGameHighScore');
+      if (savedHighScore) {
+        highScore = parseInt(savedHighScore);
+        updateHighScore();
+      }
+    }
+
+    async function loadCameras() {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter(device => device.kind === 'videoinput');
+      
+      const selector = document.getElementById('camera-selector');
+      selector.innerHTML = '';
+      
+      videoDevices.forEach((device, index) => {
+        const option = document.createElement('option');
+        option.value = device.deviceId;
+        option.textContent = device.label || `카메라 ${index + 1}`;
+        selector.appendChild(option);
+      });
+
+      selector.addEventListener('change', async () => {
+        try { await startCamera(selector.value); }
+        catch (error) { console.error(error); showCameraError(error); }
+      });
+
+      // 권한을 받기 전에는 deviceId가 빈 값이라, 빈 값이면 기본 카메라로 요청
+      await startCamera(videoDevices.length > 0 ? videoDevices[0].deviceId : null);
+
+      // 권한을 받은 뒤 카메라 이름까지 보이도록 목록 다시 채우기
+      const track = video.srcObject && video.srcObject.getVideoTracks()[0];
+      const currentId = track && track.getSettings().deviceId;
+      const updated = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+      selector.innerHTML = '';
+      updated.forEach((device, index) => {
+        const option = document.createElement('option');
+        option.value = device.deviceId;
+        option.textContent = device.label || `카메라 ${index + 1}`;
+        if (device.deviceId === currentId) option.selected = true;
+        selector.appendChild(option);
+      });
+    }
+
+    function showCameraError(error) {
+      let msg = '❌ 카메라를 켜지 못했습니다. (' + (error && error.name) + ')';
+      if (error && error.name === 'NotAllowedError') {
+        msg = '❌ 카메라 권한이 거부되었습니다. 주소창 왼쪽 아이콘 → 카메라 → 허용 후 새로고침하세요.';
+      } else if (error && error.name === 'NotFoundError') {
+        msg = '❌ 카메라를 찾을 수 없습니다. 웹캠 연결을 확인하세요.';
+      } else if (error && error.name === 'NotReadableError') {
+        msg = '❌ 다른 프로그램이나 탭에서 카메라를 사용 중입니다. 닫고 새로고침하세요.';
+      }
+      const el = document.getElementById('camera-error');
+      el.textContent = msg;
+      el.style.display = 'block';
+    }
+
+    async function startCamera(deviceId) {
+      if (video.srcObject) {
+        video.srcObject.getTracks().forEach(track => track.stop());
+      }
+
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: deviceId ? { deviceId: { exact: deviceId } } : true,
+          audio: false
+        });
+      } catch (e) {
+        if (e.name === 'NotAllowedError') throw e;
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      }
+      document.getElementById('camera-error').style.display = 'none';
+
+      video.srcObject = stream;
+      video.onloadedmetadata = () => {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+      };
+    }
+
+    async function loadModel() {
+      try {
+        await tf.ready();
+        detector = await poseDetection.createDetector(
+          poseDetection.SupportedModels.MoveNet,
+          { modelType: poseDetection.movenet.modelType.SINGLEPOSE_THUNDER }
+        );
+        
+        document.getElementById('start-button').disabled = false;
+        document.getElementById('start-button').textContent = "게임 시작";
+        document.getElementById('loading-text').textContent = '준비 완료!';
+      } catch (error) {
+        console.error(error);
+        document.getElementById('loading-text').textContent = '모델 로딩 실패. 페이지를 새로고침해주세요.';
+      }
+    }
+
+    async function startGame() {
+      if (!video.srcObject) {
+        const el = document.getElementById('camera-error');
+        el.textContent = '❌ 카메라가 켜져 있지 않아요. 카메라를 허용한 뒤 새로고침해 주세요.';
+        el.style.display = 'block';
+        return;
+      }
+      document.getElementById('setup-screen').style.display = 'none';
+      document.getElementById('game-screen').style.display = 'flex';
+      document.getElementById('baseline').style.display = 'block'; 
+      document.getElementById('game-over').style.display = 'none';
+      document.getElementById('reset-button').style.display = 'none';
+      document.getElementById('stop-button').style.display = 'block';
+      
+      await countdown();
+      
+      gameState = 'playing';
+      score = 0;
+      remainingTime = GAME_DURATION;
+      blocks = [];
+      
+      // 🚀 기본 속도 및 간격에 1.2배 적용
+      blockSpeed = 2 * SPEED_MULTIPLIER;
+      blockInterval = 2000 / SPEED_MULTIPLIER;
+      
+      lastBlockTime = Date.now();
+      
+      updateScore();
+      updateTimer();
+      startTimer();
+      gameLoop();
+    }
+
+    function stopGame() {
+      blocks.forEach(block => { if (block.el) block.el.remove(); });
+      blocks = [];
+      
+      if (animationId) cancelAnimationFrame(animationId);
+      if (timerInterval) clearInterval(timerInterval);
+      
+      gameState = 'setup';
+      document.getElementById('game-screen').style.display = 'none';
+      document.getElementById('baseline').style.display = 'none'; 
+      document.getElementById('setup-screen').style.display = 'flex';
+      document.getElementById('stop-button').style.display = 'none';
+    }
+
+    function resetGame() {
+      blocks.forEach(block => { if (block.el) block.el.remove(); });
+      blocks = [];
+      
+      if (animationId) cancelAnimationFrame(animationId);
+      if (timerInterval) clearInterval(timerInterval);
+      
+      gameState = 'setup';
+      document.getElementById('game-screen').style.display = 'none';
+      document.getElementById('baseline').style.display = 'none';
+      document.getElementById('setup-screen').style.display = 'flex';
+      document.getElementById('game-over').style.display = 'none';
+      document.getElementById('reset-button').style.display = 'none';
+      document.getElementById('stop-button').style.display = 'none';
+    }
+
+    async function countdown() {
+      const countdownEl = document.getElementById('countdown');
+      countdownEl.style.display = 'block';
+      
+      for (let i = 3; i > 0; i--) {
+        countdownEl.textContent = i;
+        playBeep(440, 0.2);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      
+      countdownEl.textContent = 'GO!';
+      playBeep(880, 0.3);
+      await new Promise(resolve => setTimeout(resolve, 500));
+      countdownEl.style.display = 'none';
+    }
+
+    function startTimer() {
+      timerInterval = setInterval(() => {
+        remainingTime--;
+        updateTimer();
+        if (remainingTime <= 0) endGame();
+      }, 1000);
+    }
+
+    function updateTimer() {
+      const minutes = Math.floor(remainingTime / 60);
+      const seconds = remainingTime % 60;
+      document.getElementById('timer').textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    }
+
+    function endGame() {
+      gameState = 'ended';
+      
+      if (timerInterval) clearInterval(timerInterval);
+      if (animationId) cancelAnimationFrame(animationId);
+      
+      if (score > highScore) {
+        highScore = score;
+        localStorage.setItem('footGameHighScore', highScore);
+        updateHighScore();
+        document.getElementById('high-score-message').textContent = '🎉 신기록 달성!';
+      } else {
+        document.getElementById('high-score-message').textContent = '';
+      }
+      
+      document.getElementById('final-score').textContent = `최종 점수: ${score}`;
+      document.getElementById('game-over').style.display = 'block';
+      document.getElementById('reset-button').style.display = 'block';
+      document.getElementById('stop-button').style.display = 'none';
+    }
+
+    function createBlockPair() {
+      const positions = [...BLOCK_POSITIONS];
+      const index1 = Math.floor(Math.random() * positions.length);
+      const pos1 = positions[index1];
+      
+      positions.splice(index1, 1);
+      const validPositions = positions.filter(p => Math.abs(p - pos1) <= 0.3);
+      if (validPositions.length === 0) validPositions.push(...positions);
+      
+      const pos2 = validPositions[Math.floor(Math.random() * validPositions.length)];
+      const pairId = Date.now();
+      
+      const block1 = { id: pairId + '_1', pairId: pairId, x: pos1, y: 0, active: false, hit: false, missed: false, el: null };
+      const block2 = { id: pairId + '_2', pairId: pairId, x: pos2, y: 0, active: false, hit: false, missed: false, el: null };
+      
+      block1.el = createBlockElement(block1);
+      block2.el = createBlockElement(block2);
+      
+      blocks.push(block1, block2);
+    }
+
+    function createBlockElement(block) {
+      const el = document.createElement('div');
+      el.className = 'block normal';
+      el.style.left = `${block.x * 100}%`;
+      el.style.top = `${block.y * 100}%`;
+      el.style.transform = 'translate(-50%, -50%)';
+      document.querySelector('.ui-layer').appendChild(el);
+      return el;
+    }
+
+    async function gameLoop() {
+      if (gameState !== 'playing') return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const poses = await detector.estimatePoses(video);
+      
+      if (poses.length > 0) {
+        drawPose(poses[0]);
+        checkCollisions(poses[0]);
+      }
+
+      const now = Date.now();
+      
+      // 🚀 시간이 지날수록 블럭 스피드업 & 생성주기 단축 (1.2배율 적용)
+      const elapsedTime = GAME_DURATION - remainingTime;
+      blockSpeed = (2 + (elapsedTime / 30)) * SPEED_MULTIPLIER; 
+      
+      // 최소 생성 주기 한계치를 800 -> 600으로 줄여 후반부 체감 난이도 대폭 상승
+      blockInterval = Math.max(600, (2000 - (elapsedTime * 12)) / SPEED_MULTIPLIER); 
+
+      if (now - lastBlockTime > blockInterval) {
+        createBlockPair();
+        lastBlockTime = now;
+      }
+
+      updateBlocks();
+      animationId = requestAnimationFrame(gameLoop);
+    }
+
+    function updateBlocks() {
+      blocks = blocks.filter(block => {
+        block.y += blockSpeed / canvas.height;
+        
+        if (block.y >= 0.6 && !block.active) {
+          block.active = true;
+          block.el.className = 'block active';
+        }
+
+        // 화면 밖으로 넘어가면 놓친 것(MISS)으로 간주하여 감점
+        if (block.y > 1.1) {
+          if (gameState === 'playing' && !block.hit && !block.missed) {
+            block.missed = true;
+            score = Math.max(0, score - 5); // 블럭당 5점 감점 (양발 놓치면 총 10점 감점)
+            updateScore();
+            playBeep(150, 0.2, 'square'); // 오답 효과음
+            
+            const pixelX = block.x * canvas.width;
+            const pixelY = canvas.height * 0.9;
+            showSuccess(pixelX, pixelY, "MISS", -5, "#ef4444"); // 빨간색 MISS
+          }
+          block.el.remove();
+          return false;
+        }
+
+        block.el.style.top = `${block.y * 100}%`;
+        return true;
+      });
+    }
+
+    function drawPose(pose) {
+      const leftAnkle = pose.keypoints.find(k => k.name === 'left_ankle');
+      const rightAnkle = pose.keypoints.find(k => k.name === 'right_ankle');
+
+      if (leftAnkle && leftAnkle.score > 0.3) drawKeypoint(leftAnkle, '#4ade80');
+      if (rightAnkle && rightAnkle.score > 0.3) drawKeypoint(rightAnkle, '#4ade80');
+    }
+
+    function drawKeypoint(keypoint, color) {
+      ctx.beginPath();
+      ctx.arc(keypoint.x, keypoint.y, 15, 0, 2 * Math.PI);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.strokeStyle = 'white';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
+
+    function checkCollisions(pose) {
+      const leftAnkle = pose.keypoints.find(k => k.name === 'left_ankle');
+      const rightAnkle = pose.keypoints.find(k => k.name === 'right_ankle');
+
+      const validLeftAnkle = leftAnkle && leftAnkle.score > 0.3 ? leftAnkle : null;
+      const validRightAnkle = rightAnkle && rightAnkle.score > 0.3 ? rightAnkle : null;
+      
+      const activeBlocks = blocks.filter(b => b.active && !b.hit);
+      if (activeBlocks.length === 0) return;
+      
+      const blockPairs = new Map();
+      activeBlocks.forEach(block => {
+        if (!blockPairs.has(block.pairId)) blockPairs.set(block.pairId, []);
+        blockPairs.get(block.pairId).push(block);
+      });
+      
+      blockPairs.forEach((pair, pairId) => {
+        if (pair.length !== 2) return;
+        
+        pair.sort((a, b) => a.x - b.x);
+        const leftBlock = pair[0];  
+        const rightBlock = pair[1]; 
+        
+        const leftBlockPixelX = leftBlock.x * canvas.width;
+        const leftBlockPixelY = leftBlock.y * canvas.height;
+        const rightBlockPixelX = rightBlock.x * canvas.width;
+        const rightBlockPixelY = rightBlock.y * canvas.height;
+
+        const HIT_RADIUS = 60; 
+        
+        let leftFootHit = false;
+        let rightFootHit = false;
+        
+        if (validLeftAnkle) {
+          const flippedLeftX = canvas.width - validLeftAnkle.x;
+          const distX = Math.abs(flippedLeftX - leftBlockPixelX);
+          const distY = Math.abs(validLeftAnkle.y - leftBlockPixelY);
+          if (distX < HIT_RADIUS && distY < HIT_RADIUS) {
+            leftFootHit = true;
+          }
+        }
+        
+        if (validRightAnkle) {
+          const flippedRightX = canvas.width - validRightAnkle.x;
+          const distX = Math.abs(flippedRightX - rightBlockPixelX);
+          const distY = Math.abs(validRightAnkle.y - rightBlockPixelY);
+          if (distX < HIT_RADIUS && distY < HIT_RADIUS) {
+            rightFootHit = true;
+          }
+        }
+        
+        if (leftFootHit && rightFootHit) {
+          leftBlock.hit = true;
+          rightBlock.hit = true;
+          
+          const avgBlockY = (leftBlock.y + rightBlock.y) / 2;
+          const distanceToBaseline = Math.abs(avgBlockY - BASELINE_Y);
+          
+          let points = 10;
+          let hitText = "GOOD";
+          let hitColor = "#60a5fa"; 
+          
+          if (distanceToBaseline < 0.04) { 
+            points = 30;
+            hitText = "PERFECT!";
+            hitColor = "#fbbf24"; 
+          } else if (distanceToBaseline < 0.08) { 
+            points = 20;
+            hitText = "GREAT";
+            hitColor = "#4ade80"; 
+          }
+
+          score += points;
+          updateScore();
+          playBeep(points === 30 ? 880 : 660, 0.15);
+          
+          const midX = (leftBlock.x + rightBlock.x) / 2 * canvas.width;
+          const midY = (leftBlock.y + rightBlock.y) / 2 * canvas.height;
+          showSuccess(midX, midY, hitText, points, hitColor);
+          
+          leftBlock.el.classList.add('hit-animation');
+          rightBlock.el.classList.add('hit-animation');
+          setTimeout(() => {
+            leftBlock.el.remove();
+            rightBlock.el.remove();
+          }, 400);
+        }
+      });
+
+      blocks = blocks.filter(b => !b.hit);
+    }
+
+    function showSuccess(x, y, text, points, color) {
+      const successEl = document.createElement('div');
+      successEl.className = 'success-indicator';
+      
+      const pointStr = points > 0 ? `+${points}` : `${points}`;
+      
+      successEl.innerHTML = `
+        <div style="font-size: 50px; color: ${color};">${text}</div>
+        <div style="font-size: 35px; color: white;">${pointStr}</div>
+      `;
+      
+      successEl.style.left = `${(x / canvas.width) * 100}%`;
+      successEl.style.top = `${(y / canvas.height) * 100}%`;
+      successEl.style.transform = 'translate(-50%, -50%)';
+      document.querySelector('.ui-layer').appendChild(successEl);
+      
+      setTimeout(() => successEl.remove(), 1000);
+    }
+
+    function updateScore() {
+      document.getElementById('score').textContent = `점수: ${score}`;
+    }
+
+    function updateHighScore() {
+      document.getElementById('high-score').textContent = `최고: ${highScore}`;
+    }
+
+    init();
+  </script>
+</body>
+</html>

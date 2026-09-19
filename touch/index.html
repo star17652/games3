@@ -1,0 +1,880 @@
+<!doctype html>
+<html lang="ko">
+ <head>
+  <script src="../gate.js" data-lock="1"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>손 터치 숫자 게임 - MoveNet</title><!-- TensorFlow.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.0"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #000;
+    }
+
+    #game-container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      background: #000;
+      overflow: hidden;
+    }
+
+    #video {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      z-index: 1;
+    }
+
+    #canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 2;
+      transform: scaleX(-1);
+    }
+
+    .number-circle {
+      position: absolute;
+      width: 100px;
+      height: 100px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 48px;
+      font-weight: bold;
+      color: white;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+      transition: transform 0.2s, opacity 0.2s;
+      cursor: pointer;
+      user-select: none;
+      z-index: 10;
+    }
+
+    .number-circle.correct {
+      animation: correctAnim 0.4s ease;
+    }
+
+    .number-circle.wrong {
+      animation: wrongAnim 0.4s ease;
+    }
+
+    @keyframes correctAnim {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.3); }
+      100% { transform: scale(0); opacity: 0; }
+    }
+
+    @keyframes wrongAnim {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-10px); }
+      75% { transform: translateX(10px); }
+    }
+
+    #score-panel {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      background: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 20px 28px;
+      border-radius: 20px;
+      font-size: 24px;
+      font-weight: bold;
+      z-index: 100;
+      backdrop-filter: blur(10px);
+      border: 2px solid rgba(255, 255, 255, 0.2);
+    }
+
+    #score-panel .label {
+      font-size: 14px;
+      opacity: 0.8;
+      margin-bottom: 4px;
+    }
+
+    #timer-panel {
+      position: absolute;
+      top: 120px;
+      left: 20px;
+      background: rgba(0, 0, 0, 0.8);
+      color: white;
+      padding: 20px 28px;
+      border-radius: 20px;
+      font-size: 32px;
+      font-weight: bold;
+      z-index: 100;
+      backdrop-filter: blur(10px);
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      transition: all 0.3s;
+    }
+
+    #timer-panel .label {
+      font-size: 14px;
+      opacity: 0.8;
+      margin-bottom: 4px;
+    }
+
+    #timer-panel.warning {
+      background: rgba(255, 50, 50, 0.9);
+      animation: timerBlink 0.5s infinite;
+    }
+
+    @keyframes timerBlink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    #high-score-panel {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: rgba(255, 215, 0, 0.95);
+      color: #333;
+      padding: 16px 24px;
+      border-radius: 20px;
+      font-size: 20px;
+      font-weight: bold;
+      z-index: 100;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 4px 16px rgba(255, 215, 0, 0.5);
+    }
+
+    #high-score-panel .label {
+      font-size: 12px;
+      opacity: 0.8;
+      margin-bottom: 4px;
+    }
+
+    #start-screen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.92);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 200;
+      color: white;
+      text-align: center;
+      padding: 40px;
+    }
+
+    #start-screen h1 {
+      font-size: 48px;
+      margin-bottom: 24px;
+      text-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    }
+
+    #start-screen p {
+      font-size: 20px;
+      margin-bottom: 40px;
+      opacity: 0.9;
+      line-height: 1.8;
+      max-width: 600px;
+    }
+
+    #status-message {
+      margin-top: 20px;
+      padding: 16px 32px;
+      background: rgba(102, 126, 234, 0.3);
+      border-radius: 12px;
+      font-size: 16px;
+      color: #ffd700;
+      min-height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #start-btn {
+      padding: 20px 60px;
+      font-size: 24px;
+      font-weight: bold;
+      color: white;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border: none;
+      border-radius: 50px;
+      cursor: pointer;
+      box-shadow: 0 8px 24px rgba(102, 126, 234, 0.4);
+      transition: transform 0.2s, opacity 0.3s;
+    }
+
+    #start-btn:hover {
+      transform: scale(1.05);
+    }
+
+    #start-btn:active {
+      transform: scale(0.95);
+    }
+
+    #start-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: scale(1);
+    }
+
+    .hand-indicator {
+      position: absolute;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: rgba(255, 50, 50, 0.8);
+      border: 5px solid white;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      z-index: 50;
+      box-shadow: 0 4px 12px rgba(255, 50, 50, 0.6);
+    }
+
+    #game-over-screen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.95);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 300;
+      color: white;
+      text-align: center;
+      padding: 40px;
+    }
+
+    #game-over-screen h2 {
+      font-size: 56px;
+      margin-bottom: 32px;
+      color: #ffd700;
+      text-shadow: 0 4px 12px rgba(255, 215, 0, 0.5);
+    }
+
+    #game-over-screen .final-score {
+      font-size: 36px;
+      margin-bottom: 20px;
+    }
+
+    #game-over-screen .high-score-message {
+      font-size: 24px;
+      margin-bottom: 40px;
+      opacity: 0.9;
+    }
+
+    #restart-btn {
+      padding: 20px 60px;
+      font-size: 24px;
+      font-weight: bold;
+      color: white;
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+      border: none;
+      border-radius: 50px;
+      cursor: pointer;
+      box-shadow: 0 8px 24px rgba(245, 87, 108, 0.4);
+      transition: transform 0.2s;
+      margin-top: 20px;
+    }
+
+    #restart-btn:hover {
+      transform: scale(1.05);
+    }
+
+    #combo-indicator {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 56px;
+      font-weight: bold;
+      color: #ffd700;
+      opacity: 0;
+      pointer-events: none;
+      z-index: 150;
+      text-shadow: 0 0 30px rgba(255, 215, 0, 1);
+      transition: opacity 0.3s;
+    }
+
+    #debug-info {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      background: rgba(0, 0, 0, 0.8);
+      color: #0f0;
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-family: monospace;
+      z-index: 100;
+      max-width: 300px;
+    }
+  </style>
+  <style>@view-transition { navigation: auto; }</style>
+  <script src="https://cdn.tailwindcss.com" type="text/javascript"></script>
+ </head>
+ <body>
+  <div id="game-container">
+   <video id="video" autoplay playsinline></video>
+   <canvas id="canvas"></canvas>
+   <div id="score-panel">
+    <div class="label">
+     점수
+    </div>
+    <div id="score">
+     0
+    </div>
+   </div>
+   <div id="timer-panel">
+    <div class="label">
+     ⏱️ 남은 시간
+    </div>
+    <div id="timer">
+     2:00
+    </div>
+   </div>
+   <div id="high-score-panel">
+    <div class="label">
+     🏆 최고 점수
+    </div>
+    <div id="high-score">
+     0
+    </div>
+   </div>
+   <div id="combo-indicator"></div>
+   <div id="debug-info">
+    카메라 상태: <span id="camera-status-text">대기중</span><br>
+     포즈 인식: <span id="pose-status-text">없음</span><br>
+     손 위치: <span id="hand-position-text">-</span>
+   </div>
+   <div id="start-screen">
+    <h1>🎯 손 터치 숫자 게임</h1>
+    <p><strong>MoveNet</strong> 전신 인식으로<br>
+      양손 손목을 추적합니다!<br><br>
+      화면에 나타나는 숫자를 1→2→3→4 순서대로<br>
+      손으로 터치하세요!<br><br>
+      ⏱️ <strong>제한 시간: 2분</strong><br>
+      ✅ 순서대로 터치: +10점<br>
+      ❌ 순서가 틀리면: -5점<br>
+      🔥 4개 연속 성공: 보너스 +20점<br><br><small>ESC 키를 누르면 게임이 종료됩니다</small></p><button id="start-btn">🎮 게임 시작 (카메라 켜기)</button>
+    <div id="status-message">
+     버튼을 클릭하면 카메라 권한을 요청합니다
+    </div>
+   </div>
+   <div id="game-over-screen">
+    <h2>게임 종료!</h2>
+    <div class="final-score">
+     최종 점수: <span id="final-score-value">0</span>
+    </div>
+    <div class="high-score-message" id="high-score-message"></div><button id="restart-btn">다시 시작</button>
+   </div>
+  </div>
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const scorePanel = document.getElementById('score');
+    const timerPanel = document.getElementById('timer');
+    const timerPanelDiv = document.getElementById('timer-panel');
+    const highScorePanel = document.getElementById('high-score');
+    const startScreen = document.getElementById('start-screen');
+    const gameOverScreen = document.getElementById('game-over-screen');
+    const startBtn = document.getElementById('start-btn');
+    const restartBtn = document.getElementById('restart-btn');
+    const gameContainer = document.getElementById('game-container');
+    const comboIndicator = document.getElementById('combo-indicator');
+    const cameraStatusText = document.getElementById('camera-status-text');
+    const poseStatusText = document.getElementById('pose-status-text');
+    const handPositionText = document.getElementById('hand-position-text');
+    const statusMessage = document.getElementById('status-message');
+
+    let score = 0;
+    let highScore = 0;
+    let gameStarted = false;
+    let numbers = [];
+    let nextNumber = 1;
+    let roundCount = 0;
+    let consecutiveRounds = 0;
+    let cameraReady = false;
+    let detector;
+    let roundErrors = 0;
+    let timeLeft = 120; // 2분 = 120초
+    let timerInterval;
+
+    // 효과음 생성 (Web Audio API)
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    
+    // 정답 효과음 (밝고 경쾌한 소리)
+    function playCorrectSound() {
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.value = 800;
+      oscillator.type = 'sine';
+      
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.2);
+      
+      // 두 번째 음 (화음)
+      const osc2 = audioContext.createOscillator();
+      const gain2 = audioContext.createGain();
+      osc2.connect(gain2);
+      gain2.connect(audioContext.destination);
+      osc2.frequency.value = 1000;
+      osc2.type = 'sine';
+      gain2.gain.setValueAtTime(0.2, audioContext.currentTime);
+      gain2.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+      osc2.start(audioContext.currentTime);
+      osc2.stop(audioContext.currentTime + 0.2);
+    }
+    
+    // 오답 효과음 (무겁고 낮은 소리)
+    function playWrongSound() {
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.value = 150;
+      oscillator.type = 'sawtooth';
+      
+      gainNode.gain.setValueAtTime(0.4, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.3);
+    }
+    
+    // 콤보 효과음 (화려한 소리)
+    function playComboSound() {
+      for (let i = 0; i < 3; i++) {
+        setTimeout(() => {
+          const osc = audioContext.createOscillator();
+          const gain = audioContext.createGain();
+          osc.connect(gain);
+          gain.connect(audioContext.destination);
+          osc.frequency.value = 600 + (i * 200);
+          osc.type = 'sine';
+          gain.gain.setValueAtTime(0.25, audioContext.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
+          osc.start(audioContext.currentTime);
+          osc.stop(audioContext.currentTime + 0.15);
+        }, i * 50);
+      }
+    }
+
+    // 캔버스 크기 설정
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    // MoveNet 감지할 관절점
+    const KEYPOINT_NAMES = {
+      LEFT_WRIST: 9,
+      RIGHT_WRIST: 10
+    };
+
+    // 타이머 업데이트
+    function updateTimer() {
+      const minutes = Math.floor(timeLeft / 60);
+      const seconds = timeLeft % 60;
+      timerPanel.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+      
+      // 30초 이하일 때 경고
+      if (timeLeft <= 30) {
+        timerPanelDiv.classList.add('warning');
+      } else {
+        timerPanelDiv.classList.remove('warning');
+      }
+      
+      // 시간 종료
+      if (timeLeft <= 0) {
+        clearInterval(timerInterval);
+        endGame();
+      }
+    }
+
+    // 타이머 시작
+    function startTimer() {
+      timeLeft = 120;
+      updateTimer();
+      timerInterval = setInterval(() => {
+        timeLeft--;
+        updateTimer();
+      }, 1000);
+    }
+
+    // 게임 시작 버튼
+    startBtn.addEventListener('click', async () => {
+      startBtn.disabled = true;
+      startBtn.textContent = '로딩 중...';
+      statusMessage.textContent = '⚙️ TensorFlow 초기화중...';
+      statusMessage.style.background = 'rgba(102, 126, 234, 0.3)';
+
+      try {
+        // TensorFlow.js 먼저 초기화
+        console.log('TensorFlow 초기화 시작...');
+        
+        // 백엔드를 명시적으로 설정
+        if (tf.getBackend() !== 'webgl') {
+          await tf.setBackend('webgl');
+        }
+        await tf.ready();
+        
+        console.log('TensorFlow 준비 완료, 백엔드:', tf.getBackend());
+        statusMessage.textContent = `✅ TensorFlow 준비 완료 (${tf.getBackend()})`;
+        
+        // 카메라 초기화
+        statusMessage.textContent = '🎥 카메라 권한을 허용해주세요...';
+        statusMessage.style.background = 'rgba(255, 165, 0, 0.3)';
+        
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { 
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            facingMode: 'user'
+          },
+          audio: false
+        });
+        
+        video.srcObject = stream;
+        await video.play();
+        
+        cameraReady = true;
+        cameraStatusText.textContent = '✅ 작동중';
+        statusMessage.textContent = '✅ 카메라 준비 완료! MoveNet 모델 로딩중...';
+        statusMessage.style.background = 'rgba(0, 255, 0, 0.3)';
+
+        // MoveNet 모델 로드
+        console.log('MoveNet 모델 로드 시작...');
+        detector = await poseDetection.createDetector(
+          poseDetection.SupportedModels.MoveNet,
+          {
+            modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING
+          }
+        );
+        console.log('MoveNet 모델 로드 완료');
+
+        statusMessage.textContent = '✅ 모든 준비 완료! 게임 시작...';
+
+        // 게임 시작
+        setTimeout(() => {
+          startScreen.style.display = 'none';
+          gameStarted = true;
+          score = 0;
+          consecutiveRounds = 0;
+          roundErrors = 0;
+          updateScore();
+          spawnNumbers();
+          startTimer();
+          detectPose();
+        }, 1000);
+
+      } catch (error) {
+        console.error('초기화 오류:', error);
+        console.error('에러 스택:', error.stack);
+        
+        let errorMsg = '';
+        if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+          errorMsg = '❌ 카메라 권한이 거부되었습니다.\n브라우저 설정에서 카메라를 허용해주세요.';
+        } else if (error.name === 'NotFoundError') {
+          errorMsg = '❌ 카메라를 찾을 수 없습니다.';
+        } else {
+          errorMsg = '❌ 오류: ' + error.message;
+        }
+        
+        statusMessage.textContent = errorMsg;
+        statusMessage.style.background = 'rgba(255, 0, 0, 0.3)';
+        cameraStatusText.textContent = '❌ 오류';
+        startBtn.disabled = false;
+        startBtn.textContent = '다시 시도';
+      }
+    });
+
+    restartBtn.addEventListener('click', () => {
+      gameOverScreen.style.display = 'none';
+      gameStarted = true;
+      score = 0;
+      consecutiveRounds = 0;
+      roundErrors = 0;
+      timeLeft = 120;
+      timerPanelDiv.classList.remove('warning');
+      updateScore();
+      spawnNumbers();
+      startTimer();
+    });
+
+    // 포즈 감지 루프
+    async function detectPose() {
+      if (!gameStarted && gameOverScreen.style.display !== 'flex') return;
+
+      if (video.readyState === 4) {
+        try {
+          const poses = await detector.estimatePoses(video);
+          
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+          if (poses.length > 0) {
+            const pose = poses[0];
+            poseStatusText.textContent = '✅ 감지됨';
+
+            // 양손 손목 추적
+            const leftWrist = pose.keypoints[KEYPOINT_NAMES.LEFT_WRIST];
+            const rightWrist = pose.keypoints[KEYPOINT_NAMES.RIGHT_WRIST];
+
+            // 좌표 변환 (비디오 -> 캔버스, 좌우 반전 고려)
+            const scaleX = canvas.width / video.videoWidth;
+            const scaleY = canvas.height / video.videoHeight;
+
+            if (leftWrist.score > 0.3) {
+              const x = canvas.width - (leftWrist.x * scaleX);
+              const y = leftWrist.y * scaleY;
+              drawHandIndicator(x, y);
+              if (gameStarted) checkNumberTouch(x, y);
+              handPositionText.textContent = `왼손 (${Math.round(x)}, ${Math.round(y)})`;
+            }
+
+            if (rightWrist.score > 0.3) {
+              const x = canvas.width - (rightWrist.x * scaleX);
+              const y = rightWrist.y * scaleY;
+              drawHandIndicator(x, y);
+              if (gameStarted) checkNumberTouch(x, y);
+              handPositionText.textContent = `오른손 (${Math.round(x)}, ${Math.round(y)})`;
+            }
+
+            // 스켈레톤 그리기
+            drawSkeleton(pose.keypoints, scaleX, scaleY);
+
+          } else {
+            poseStatusText.textContent = '❌ 미감지';
+            handPositionText.textContent = '-';
+          }
+        } catch (error) {
+          console.error('포즈 감지 오류:', error);
+        }
+      }
+
+      requestAnimationFrame(detectPose);
+    }
+
+    // 스켈레톤 그리기
+    function drawSkeleton(keypoints, scaleX, scaleY) {
+      const connections = [
+        [5, 7], [7, 9],   // 왼팔
+        [6, 8], [8, 10],  // 오른팔
+        [5, 6],           // 어깨
+        [5, 11], [6, 12], // 몸통
+        [11, 12],         // 엉덩이
+        [11, 13], [13, 15], // 왼다리
+        [12, 14], [14, 16]  // 오른다리
+      ];
+
+      ctx.strokeStyle = 'rgba(0, 255, 0, 0.5)';
+      ctx.lineWidth = 3;
+
+      connections.forEach(([i, j]) => {
+        const kp1 = keypoints[i];
+        const kp2 = keypoints[j];
+        
+        if (kp1.score > 0.3 && kp2.score > 0.3) {
+          ctx.beginPath();
+          ctx.moveTo(canvas.width - (kp1.x * scaleX), kp1.y * scaleY);
+          ctx.lineTo(canvas.width - (kp2.x * scaleX), kp2.y * scaleY);
+          ctx.stroke();
+        }
+      });
+
+      // 관절점 그리기
+      keypoints.forEach(kp => {
+        if (kp.score > 0.3) {
+          ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
+          ctx.beginPath();
+          ctx.arc(canvas.width - (kp.x * scaleX), kp.y * scaleY, 5, 0, 2 * Math.PI);
+          ctx.fill();
+        }
+      });
+    }
+
+    // 손 표시
+    function drawHandIndicator(x, y) {
+      const indicator = document.createElement('div');
+      indicator.className = 'hand-indicator';
+      indicator.style.left = x + 'px';
+      indicator.style.top = y + 'px';
+      gameContainer.appendChild(indicator);
+      setTimeout(() => indicator.remove(), 100);
+    }
+
+    // 숫자 생성 - 화면 중앙을 기준으로 원형 배치
+    function spawnNumbers() {
+      if (!gameStarted) return;
+
+      document.querySelectorAll('.number-circle').forEach(el => el.remove());
+      numbers = [];
+      nextNumber = 1;
+      roundCount++;
+      lastTouchedNumber = null;
+
+      const colors = ['#ff0000', '#ff8800', '#ffff00', '#00ff00']; // 빨강, 주황, 노랑, 초록
+      const centerX = window.innerWidth / 2;
+      const centerY = window.innerHeight / 2;
+      
+      // 화면의 작은 쪽 기준으로 반지름 설정 (28% 정도로 손이 닿을 수 있는 범위)
+      const baseRadius = Math.min(window.innerWidth, window.innerHeight) * 0.28;
+      
+      // 시작 각도를 랜덤하게
+      const startAngle = Math.random() * Math.PI * 2;
+
+      for (let i = 0; i < 4; i++) {
+        // 각 숫자를 원형으로 균등하게 배치 (90도씩)
+        const angle = startAngle + (Math.PI * 2 / 4) * i;
+        
+        // 반지름에 약간의 랜덤 변화 (±15%)
+        const randomRadius = baseRadius + (Math.random() * baseRadius * 0.3) - (baseRadius * 0.15);
+        
+        const x = centerX + Math.cos(angle) * randomRadius - 50;
+        const y = centerY + Math.sin(angle) * randomRadius - 50;
+
+        const circle = document.createElement('div');
+        circle.className = 'number-circle';
+        circle.textContent = i + 1;
+        circle.style.backgroundColor = colors[i];
+        circle.style.left = x + 'px';
+        circle.style.top = y + 'px';
+        circle.dataset.number = i + 1;
+
+        gameContainer.appendChild(circle);
+        numbers.push({ el: circle, number: i + 1, x, y });
+      }
+    }
+
+    // 점수 업데이트
+    function updateScore() {
+      scorePanel.textContent = score;
+      if (score > highScore) {
+        highScore = score;
+        highScorePanel.textContent = highScore;
+      }
+    }
+
+    // 콤보 표시
+    function showCombo() {
+      comboIndicator.textContent = '🔥 PERFECT! +20';
+      comboIndicator.style.opacity = '1';
+      setTimeout(() => {
+        comboIndicator.style.opacity = '0';
+      }, 1500);
+    }
+
+    // 숫자 터치 체크
+    let lastTouchTime = 0;
+    let lastTouchedNumber = null;
+
+    function checkNumberTouch(handX, handY) {
+      const now = Date.now();
+      if (now - lastTouchTime < 500) return;
+
+      numbers.forEach(num => {
+        const rect = num.el.getBoundingClientRect();
+        const numX = rect.left + rect.width / 2;
+        const numY = rect.top + rect.height / 2;
+        const distance = Math.sqrt((handX - numX) ** 2 + (handY - numY) ** 2);
+
+        if (distance < 80 && lastTouchedNumber !== num.number) {
+          lastTouchTime = now;
+          lastTouchedNumber = num.number;
+
+          if (num.number === nextNumber) {
+            score += 10;
+            playCorrectSound();
+            num.el.classList.add('correct');
+            nextNumber++;
+
+            setTimeout(() => {
+              num.el.remove();
+              if (nextNumber > 4) {
+                if (roundErrors === 0) {
+                  consecutiveRounds++;
+                  score += 20;
+                  playComboSound();
+                  showCombo();
+                } else {
+                  consecutiveRounds = 0;
+                }
+                roundErrors = 0;
+                setTimeout(spawnNumbers, 500);
+              }
+            }, 400);
+          } else {
+            score = Math.max(0, score - 5);
+            playWrongSound();
+            roundErrors++;
+            consecutiveRounds = 0;
+            num.el.classList.add('wrong');
+            setTimeout(() => {
+              num.el.classList.remove('wrong');
+            }, 400);
+          }
+
+          updateScore();
+        }
+      });
+    }
+
+    // ESC로 종료
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && gameStarted) {
+        endGame();
+      }
+    });
+
+    function endGame() {
+      gameStarted = false;
+      clearInterval(timerInterval);
+      document.getElementById('final-score-value').textContent = score;
+      
+      if (score === highScore && score > 0) {
+        document.getElementById('high-score-message').textContent = '🎉 새로운 최고 기록입니다!';
+      } else {
+        document.getElementById('high-score-message').textContent = `최고 기록: ${highScore}점`;
+      }
+      
+      gameOverScreen.style.display = 'flex';
+      document.querySelectorAll('.number-circle').forEach(el => el.remove());
+    }
+  </script>
+</body>
+</html>

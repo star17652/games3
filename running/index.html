@@ -1,0 +1,1160 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <script src="../gate.js" data-lock="1"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>잉카 원주민 vs 스페인군 모션 달리기 대결</title>
+    <!-- TensorFlow.js & Pose Detection -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome & Canvas Confetti -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Jua&family=Noto+Sans+KR:wght@400;600;800&display=swap" rel="stylesheet">
+
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: 'Noto Sans KR', sans-serif;
+        }
+
+        .font-jua {
+            font-family: 'Jua', sans-serif;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #0f172a;
+            color: #1e293b;
+        }
+
+        #video-background {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+            transform: scaleX(-1);
+            z-index: -2;
+            opacity: 0.85;
+            filter: brightness(0.9);
+        }
+
+        #canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+            transform: scaleX(-1);
+            z-index: -1;
+        }
+
+        .running-animation {
+            animation: bounce 0.25s infinite alternate ease-in-out;
+        }
+
+        @keyframes bounce {
+            from { transform: translateY(-50%) scale(1); }
+            to { transform: translateY(-65%) scale(1.15) rotate(5deg); }
+        }
+
+        @keyframes pulseCount {
+            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
+            50% { transform: translate(-50%, -50%) scale(1.3); opacity: 1; }
+            100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+        }
+
+        .animate-count {
+            animation: pulseCount 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .gold-glow {
+            box-shadow: 0 0 25px rgba(245, 158, 11, 0.7);
+        }
+
+        .crimson-glow {
+            box-shadow: 0 0 25px rgba(225, 29, 72, 0.7);
+        }
+    </style>
+</head>
+<body class="h-screen w-screen relative overflow-hidden select-none">
+
+    <video id="video" autoplay playsinline class="hidden"></video>
+    <video id="video-background" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+
+    <!-- FAST LOADING OVERLAY -->
+    <div id="loading" class="fixed inset-0 bg-slate-900/90 z-50 flex flex-col items-center justify-center text-white backdrop-blur-md transition-opacity duration-300">
+        <div class="w-16 h-16 border-8 border-amber-400 border-t-transparent rounded-full animate-spin mb-5"></div>
+        <h2 id="loading-title" class="text-3xl font-jua text-amber-300 mb-2">⚡ 초고속 모션 엔진 준비 중...</h2>
+        <p id="loading-sub" class="text-slate-300 text-base max-w-md text-center">카메라 1대로 2명을 실시간 감지합니다. 잠시만 기다려주세요!</p>
+    </div>
+
+    <!-- MAIN APP CONTAINER -->
+    <div id="app-container" class="relative z-10 flex flex-col h-full justify-between p-4 max-w-7xl mx-auto">
+        
+        <!-- HEADER / TOP BAR -->
+        <header class="bg-slate-900/80 border-2 border-amber-500/50 rounded-2xl p-3 px-6 shadow-2xl backdrop-blur-md flex items-center justify-between text-white">
+            <div class="flex items-center gap-3">
+                <span class="text-3xl">☀️</span>
+                <div>
+                    <h1 class="font-jua text-2xl md:text-3xl text-amber-400 leading-tight">잉카 원주민 vs 스페인군 하늘 아이템 대결</h1>
+                    <p class="text-xs md:text-sm text-slate-300">하늘에서 떨어지는 🧊얼음, 💨방귀, 👑왕관, ⚡부스트를 피하거나 맞추세요!</p>
+                </div>
+            </div>
+
+            <!-- Top Status Badges -->
+            <div class="flex items-center gap-4">
+                <div id="top-p1-badge" class="flex items-center gap-2 bg-amber-500/20 border border-amber-400/50 px-3 py-1.5 rounded-xl">
+                    <span id="top-p1-emoji" class="text-2xl">🦙</span>
+                    <div class="text-xs">
+                        <div class="font-bold text-amber-300" id="top-p1-title">P1: 잉카 원주민</div>
+                        <div class="text-slate-200" id="top-p1-dist">0% (0m)</div>
+                    </div>
+                </div>
+
+                <div class="font-jua text-2xl text-amber-400">VS</div>
+
+                <div id="top-p2-badge" class="flex items-center gap-2 bg-rose-500/20 border border-rose-400/50 px-3 py-1.5 rounded-xl">
+                    <span id="top-p2-emoji" class="text-2xl">💂‍♂️</span>
+                    <div class="text-xs">
+                        <div class="font-bold text-rose-300" id="top-p2-title">P2: 스페인군</div>
+                        <div class="text-slate-200" id="top-p2-dist">0% (0m)</div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- RACE TRACK -->
+        <div id="race-track" class="relative bg-gradient-to-r from-amber-950/80 via-amber-800/80 to-amber-950/80 border-4 border-amber-400 rounded-3xl p-4 mt-auto mb-2 shadow-2xl backdrop-blur-sm overflow-hidden h-44 md:h-52 flex flex-col justify-between">
+            <div class="absolute inset-0 flex flex-col justify-evenly pointer-events-none opacity-20">
+                <div class="border-b-2 border-dashed border-amber-200 w-full"></div>
+                <div class="border-b-2 border-dashed border-amber-200 w-full"></div>
+            </div>
+
+            <!-- Finish Line Flag -->
+            <div class="absolute right-6 top-0 bottom-0 w-12 bg-amber-300/30 border-l-4 border-r-4 border-amber-400/80 flex flex-col justify-around items-center z-0">
+                <span class="text-2xl">🏁</span>
+                <span class="text-xl">🏁</span>
+                <span class="text-2xl">🏁</span>
+            </div>
+
+            <!-- PLAYER 1 LANE -->
+            <div class="relative h-1/2 flex items-center border-b border-amber-500/30 pr-16">
+                <div class="absolute left-2 top-1 bg-amber-600 text-white font-jua text-xs px-2.5 py-0.5 rounded-full shadow flex items-center gap-1 z-10">
+                    <span id="p1-lane-emoji">🦙</span>
+                    <span id="p1-lane-name">Player 1 (잉카 원주민)</span>
+                </div>
+
+                <div id="player1-char" class="absolute left-2 text-3xl md:text-4xl transition-all duration-100 ease-out z-20 flex items-center justify-center bg-amber-400/80 p-1.5 rounded-full border-2 border-white shadow-xl gold-glow" style="left: 2%;">
+                    <span id="p1-char-icon">🦙</span>
+                </div>
+            </div>
+
+            <!-- PLAYER 2 LANE -->
+            <div class="relative h-1/2 flex items-center pr-16">
+                <div class="absolute left-2 top-1 bg-rose-600 text-white font-jua text-xs px-2.5 py-0.5 rounded-full shadow flex items-center gap-1 z-10">
+                    <span id="p2-lane-emoji">💂‍♂️</span>
+                    <span id="p2-lane-name">Player 2 (스페인군)</span>
+                </div>
+
+                <div id="player2-char" class="absolute left-2 text-3xl md:text-4xl transition-all duration-100 ease-out z-20 flex items-center justify-center bg-rose-500/80 p-1.5 rounded-full border-2 border-white shadow-xl crimson-glow" style="left: 2%;">
+                    <span id="p2-char-icon">💂‍♂️</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- START & CHARACTER SELECTION PANEL -->
+        <div id="character-select-modal" class="bg-slate-900/80 border-4 border-amber-400 rounded-3xl p-6 md:p-8 max-w-3xl mx-auto w-full shadow-2xl text-white backdrop-blur-md">
+            <h2 class="font-jua text-3xl text-amber-400 text-center mb-2">⚔️ 캐릭터 선택 & 게임 설정</h2>
+            <p class="text-center text-slate-300 text-sm mb-4">카메라 1대에 2명이 동시에 서서 화면의 왼쪽(P1)과 오른쪽(P2)에 위치하세요!</p>
+
+            <!-- LIVE DETECTION STATUS BOX IN SELECT SCREEN -->
+            <div class="bg-slate-800/80 border-2 border-slate-600 rounded-2xl p-3 mb-6 flex flex-wrap items-center justify-around gap-2 text-sm">
+                <div class="flex items-center gap-2">
+                    <span class="font-bold text-amber-300">P1 (카메라 왼쪽):</span>
+                    <span id="select-p1-status" class="px-3 py-1 rounded-full bg-rose-900/80 text-rose-300 border border-rose-500 font-bold flex items-center gap-1">
+                        🔴 감지 안됨
+                    </span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="font-bold text-rose-300">P2 (카메라 오른쪽):</span>
+                    <span id="select-p2-status" class="px-3 py-1 rounded-full bg-rose-900/80 text-rose-300 border border-rose-500 font-bold flex items-center gap-1">
+                        🔴 감지 안됨
+                    </span>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                <!-- PLAYER 1 SELECTION -->
+                <div class="bg-amber-950/60 border-2 border-amber-500/60 rounded-2xl p-4 flex flex-col items-center">
+                    <div class="font-jua text-xl text-amber-300 mb-3 flex items-center gap-2">
+                        <span class="bg-amber-500 text-slate-900 w-6 h-6 rounded-full flex items-center justify-center text-sm font-bold">1</span>
+                        Player 1 (카메라 왼쪽)
+                    </div>
+                    
+                    <div class="text-6xl my-2 bg-amber-400/20 p-4 rounded-2xl border border-amber-400/40" id="p1-select-preview">
+                        🦙
+                    </div>
+                    <div id="p1-select-title" class="font-jua text-lg text-amber-200 mb-4">잉카 라마 전사 (잉카 제국)</div>
+
+                    <div class="grid grid-cols-2 gap-2 w-full">
+                        <button onclick="selectCharacter(1, 'inca_llama')" id="btn-p1-inca_llama" class="p1-choice-btn bg-amber-600 border-2 border-amber-300 text-white font-bold rounded-xl p-2 text-xs transition flex items-center justify-center gap-1 shadow">
+                            <span>🦙</span> 잉카 라마
+                        </button>
+                        <button onclick="selectCharacter(1, 'inca_warrior')" id="btn-p1-inca_warrior" class="p1-choice-btn bg-slate-800 border border-slate-600 hover:bg-amber-700 text-slate-200 font-bold rounded-xl p-2 text-xs transition flex items-center justify-center gap-1">
+                            <span>🪶</span> 잉카 영웅
+                        </button>
+                        <button onclick="selectCharacter(1, 'spanish_knight')" id="btn-p1-spanish_knight" class="p1-choice-btn bg-slate-800 border border-slate-600 hover:bg-rose-700 text-slate-200 font-bold rounded-xl p-2 text-xs transition flex items-center justify-center gap-1">
+                            <span>💂‍♂️</span> 스페인 기사
+                        </button>
+                        <button onclick="selectCharacter(1, 'spanish_captain')" id="btn-p1-spanish_captain" class="p1-choice-btn bg-slate-800 border border-slate-600 hover:bg-rose-700 text-slate-200 font-bold rounded-xl p-2 text-xs transition flex items-center justify-center gap-1">
+                            <span>🛡️</span> 스페인 정복자
+                        </button>
+                    </div>
+                </div>
+
+                <!-- PLAYER 2 SELECTION -->
+                <div class="bg-rose-950/60 border-2 border-rose-500/60 rounded-2xl p-4 flex flex-col items-center">
+                    <div class="font-jua text-xl text-rose-300 mb-3 flex items-center gap-2">
+                        <span class="bg-rose-500 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm font-bold">2</span>
+                        Player 2 (카메라 오른쪽)
+                    </div>
+                    
+                    <div class="text-6xl my-2 bg-rose-500/20 p-4 rounded-2xl border border-rose-400/40" id="p2-select-preview">
+                        💂‍♂️
+                    </div>
+                    <div id="p2-select-title" class="font-jua text-lg text-rose-200 mb-4">스페인 기사 (스페인군)</div>
+
+                    <div class="grid grid-cols-2 gap-2 w-full">
+                        <button onclick="selectCharacter(2, 'spanish_knight')" id="btn-p2-spanish_knight" class="p2-choice-btn bg-rose-600 border-2 border-rose-300 text-white font-bold rounded-xl p-2 text-xs transition flex items-center justify-center gap-1 shadow">
+                            <span>💂‍♂️</span> 스페인 기사
+                        </button>
+                        <button onclick="selectCharacter(2, 'spanish_captain')" id="btn-p2-spanish_captain" class="p2-choice-btn bg-slate-800 border border-slate-600 hover:bg-rose-700 text-slate-200 font-bold rounded-xl p-2 text-xs transition flex items-center justify-center gap-1">
+                            <span>🛡️</span> 스페인 정복자
+                        </button>
+                        <button onclick="selectCharacter(2, 'inca_llama')" id="btn-p2-inca_llama" class="p2-choice-btn bg-slate-800 border border-slate-600 hover:bg-amber-700 text-slate-200 font-bold rounded-xl p-2 text-xs transition flex items-center justify-center gap-1">
+                            <span>🦙</span> 잉카 라마
+                        </button>
+                        <button onclick="selectCharacter(2, 'inca_warrior')" id="btn-p2-inca_warrior" class="p2-choice-btn bg-slate-800 border border-slate-600 hover:bg-amber-700 text-slate-200 font-bold rounded-xl p-2 text-xs transition flex items-center justify-center gap-1">
+                            <span>🪶</span> 잉카 영웅
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings Row -->
+            <div class="flex flex-col sm:flex-row gap-4 items-center justify-between bg-slate-800/80 p-3 px-5 rounded-2xl mb-6 border border-slate-700">
+                <div class="flex items-center gap-2 w-full sm:w-auto">
+                    <label for="camera-select" class="text-xs font-bold text-amber-300 whitespace-nowrap">📷 카메라 선택:</label>
+                    <select id="camera-select" class="bg-slate-900 border border-amber-500/50 text-white text-xs rounded-lg p-2 w-full sm:w-60 focus:outline-none focus:ring-2 focus:ring-amber-400">
+                        <option value="">카메라 연결 중...</option>
+                    </select>
+                </div>
+
+                <div class="flex items-center gap-2 w-full sm:w-auto">
+                    <label for="distance-select" class="text-xs font-bold text-amber-300 whitespace-nowrap">🏃 승리 거리:</label>
+                    <select id="distance-select" class="bg-slate-900 border border-amber-500/50 text-white text-xs rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-amber-400 font-bold">
+                        <option value="1000" selected>1km (단거리 정복)</option>
+                        <option value="2000">2km (중거리 레이스)</option>
+                        <option value="5000">5km (장거리 마라톤)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- START BUTTON -->
+            <button id="start-button" class="w-full bg-gradient-to-r from-amber-500 via-amber-400 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-jua text-2xl py-4 rounded-2xl shadow-xl transition transform active:scale-95 flex items-center justify-center gap-2 border-2 border-white">
+                <i class="fa-solid fa-camera"></i> 모션 인식 화면으로 이동 & 준비하기
+            </button>
+        </div>
+
+        <!-- FULLSCREEN MOTION CHECK SCREEN OVERLAY -->
+        <div id="motion-check-screen" class="fixed inset-0 bg-slate-950/70 z-40 hidden flex flex-col justify-between p-6 backdrop-blur-xs pointer-events-auto">
+            <div class="bg-slate-900/95 border-2 border-amber-400 rounded-2xl p-4 max-w-2xl mx-auto text-center shadow-2xl text-white">
+                <h3 class="font-jua text-2xl text-amber-300 mb-1 flex items-center justify-center gap-2">
+                    <span class="animate-ping w-3 h-3 rounded-full bg-amber-400 inline-block"></span>
+                    📷 두 명 모두 카메라에 서주세요!
+                </h3>
+                <p id="motion-instruction-text" class="text-sm text-slate-200">
+                    <span class="text-amber-300 font-bold">P1(왼쪽)</span>과 <span class="text-rose-300 font-bold">P2(오른쪽)</span> 플레이어가 모두 인식되면 카운트다운이 시작됩니다.
+                </p>
+
+                <div class="flex items-center justify-center gap-6 mt-3">
+                    <div id="motion-p1-badge" class="px-4 py-1.5 rounded-xl bg-rose-950/80 border border-rose-500 text-rose-300 font-jua text-base flex items-center gap-2">
+                        <span>🦙 P1 (왼쪽):</span> <span id="motion-p1-text">미인식 ❌</span>
+                    </div>
+                    <div id="motion-p2-badge" class="px-4 py-1.5 rounded-xl bg-rose-950/80 border border-rose-500 text-rose-300 font-jua text-base flex items-center gap-2">
+                        <span>💂‍♂️ P2 (오른쪽):</span> <span id="motion-p2-text">미인식 ❌</span>
+                    </div>
+                </div>
+            </div>
+
+            <button id="cancel-motion-btn" class="absolute top-6 left-6 bg-slate-800/90 text-amber-300 border border-amber-400 hover:bg-slate-700 px-4 py-2 rounded-xl text-sm font-bold font-jua">
+                ⬅️ 캐릭터/설정 재선택
+            </button>
+        </div>
+
+        <!-- ITEM NOTIFICATION TOAST -->
+        <div id="item-toast" class="fixed top-24 left-1/2 -translate-x-1/2 bg-slate-900/90 border-2 border-amber-400 text-amber-300 font-jua text-xl px-6 py-2.5 rounded-2xl shadow-2xl z-50 transition-all duration-300 opacity-0 pointer-events-none transform -translate-y-4">
+            ⚡ 아이템 발동!
+        </div>
+
+        <!-- COUNTDOWN OVERLAY -->
+        <div id="countdown" class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 font-jua text-9xl text-amber-300 drop-shadow-[0_10px_10px_rgba(0,0,0,0.9)] z-50 pointer-events-none hidden">
+            3
+        </div>
+
+        <!-- WINNER BANNER MODAL -->
+        <div id="winner-banner" class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-slate-900/95 border-4 border-amber-400 rounded-3xl p-8 max-w-lg w-11/12 text-center shadow-2xl z-50 hidden backdrop-blur-xl">
+            <div id="winner-emoji" class="text-7xl mb-4 animate-bounce">🏆</div>
+            <h2 id="winner-text" class="font-jua text-4xl text-amber-300 mb-2">플레이어 1 승리!</h2>
+            <p id="winner-sub" class="text-slate-300 text-base mb-6">잉카 제국의 신속한 라마 전사가 승리했습니다!</p>
+            <button id="restart-button" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-jua text-2xl px-8 py-3 rounded-2xl border-2 border-white shadow-lg transition transform active:scale-95">
+                🔄 대결 다시 하기
+            </button>
+        </div>
+
+        <!-- Floating Reset Button during game -->
+        <button id="reset-button" class="fixed bottom-4 right-4 bg-slate-900/90 text-amber-400 border-2 border-amber-400/80 hover:bg-amber-500 hover:text-slate-950 font-jua px-4 py-2 rounded-xl shadow-lg transition z-40 hidden flex items-center gap-2 text-sm">
+            <span>🔄</span> 위치/게임 리셋
+        </button>
+    </div>
+
+    <script>
+        const CHARACTERS = {
+            inca_llama: { name: '잉카 라마 전사', emoji: '🦙', group: '잉카 제국' },
+            inca_warrior: { name: '잉카 태양 영웅', emoji: '🪶', group: '잉카 제국' },
+            spanish_knight: { name: '스페인 정복 기사', emoji: '💂‍♂️', group: '스페인 제국' },
+            spanish_captain: { name: '스페인 선장', emoji: '🛡️', group: '스페인 제국' }
+        };
+
+        let selectedP1 = 'inca_llama';
+        let selectedP2 = 'spanish_knight';
+
+        let detector = null;
+        let video;
+        let videoBg;
+        let canvas;
+        let ctx;
+        let gameState = 'PREVIEW'; // 'PREVIEW', 'MOTION_CHECK', 'COUNTDOWN', 'RACING', 'FINISHED'
+        let targetDistance = 1000;
+
+        let player1Score = 0;
+        let player2Score = 0;
+
+        // Player Statuses (Freeze, Crown, Fart, Boost)
+        let p1Status = { freezeTimer: 0, crownTimer: 0, fartTimer: 0, boostTimer: 0 };
+        let p2Status = { freezeTimer: 0, crownTimer: 0, fartTimer: 0, boostTimer: 0 };
+
+        // Falling Sky Items Array
+        let fallingItems = [];
+        let lastItemSpawnTime = 0;
+
+        let isP1Detected = false;
+        let isP2Detected = false;
+        let bothDetectedTimer = null;
+
+        let player1LastY = {};
+        let player2LastY = {};
+        let isLoopRunning = false;
+
+        // Sound Generator (Web Audio API - Zero performance overhead)
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        function playBeep(freq = 440, type = 'sine', duration = 0.15) {
+            try {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + duration);
+            } catch (e) { console.log(e); }
+        }
+
+        function playFartSound() {
+            try {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(140, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(35, audioCtx.currentTime + 0.35);
+                gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.35);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.35);
+            } catch (e) {}
+        }
+
+        function playFreezeSound() {
+            try {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                playBeep(880, 'sine', 0.1);
+                setTimeout(() => playBeep(1200, 'sine', 0.2), 60);
+            } catch (e) {}
+        }
+
+        function playCrownSound() {
+            const notes = [523.25, 659.25, 783.99, 1046.50];
+            notes.forEach((n, i) => setTimeout(() => playBeep(n, 'triangle', 0.12), i * 60));
+        }
+
+        function playBoostSound() {
+            try {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                playBeep(440, 'triangle', 0.1);
+                setTimeout(() => playBeep(880, 'triangle', 0.2), 70);
+            } catch (e) {}
+        }
+
+        function playVictorySound() {
+            const notes = [261.63, 329.63, 392.00, 523.25, 659.25];
+            notes.forEach((note, index) => {
+                setTimeout(() => playBeep(note, 'triangle', 0.25), index * 120);
+            });
+        }
+
+        async function setupCameraFast() {
+            video = document.getElementById('video');
+            videoBg = document.getElementById('video-background');
+            canvas = document.getElementById('canvas');
+            ctx = canvas.getContext('2d');
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+                    audio: false
+                });
+
+                video.srcObject = stream;
+                videoBg.srcObject = stream;
+
+                await new Promise((resolve) => {
+                    video.onloadedmetadata = () => resolve();
+                });
+
+                canvas.width = video.videoWidth || 640;
+                canvas.height = video.videoHeight || 480;
+
+                navigator.mediaDevices.enumerateDevices().then(devices => {
+                    const videoDevices = devices.filter(d => d.kind === 'videoinput');
+                    const cameraSelect = document.getElementById('camera-select');
+                    cameraSelect.innerHTML = '';
+                    videoDevices.forEach((device, index) => {
+                        const opt = document.createElement('option');
+                        opt.value = device.deviceId;
+                        opt.textContent = device.label || `카메라 ${index + 1}`;
+                        cameraSelect.appendChild(opt);
+                    });
+
+                    cameraSelect.onchange = async (e) => {
+                        const deviceId = e.target.value;
+                        if (!deviceId) return;
+                        try {
+                            if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
+                            const newStream = await navigator.mediaDevices.getUserMedia({
+                                video: { deviceId: { exact: deviceId } },
+                                audio: false
+                            });
+                            video.srcObject = newStream;
+                            videoBg.srcObject = newStream;
+                            video.onloadedmetadata = () => {
+                                canvas.width = video.videoWidth || 640;
+                                canvas.height = video.videoHeight || 480;
+                            };
+                        } catch (err) {
+                            console.error('카메라 전환 실패:', err);
+                        }
+                    };
+                });
+
+            } catch (err) {
+                console.error('Camera access error:', err);
+                alert('카메라 접근 권한이 필요합니다. 웹브라우저에서 카메라 사용을 허용해 주세요.');
+            }
+        }
+
+        async function loadModelFast() {
+            try {
+                detector = await poseDetection.createDetector(
+                    poseDetection.SupportedModels.MoveNet,
+                    { 
+                        modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
+                        enableSmoothing: true
+                    }
+                );
+            } catch (e) {
+                try {
+                    detector = await poseDetection.createDetector(
+                        poseDetection.SupportedModels.MoveNet,
+                        { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING }
+                    );
+                } catch (e2) {
+                    console.error('모델 로딩 실패:', e2);
+                    const ov = document.getElementById('loading');
+                    ov.innerHTML = '<div style="color:white;font-size:20px;text-align:center;padding:20px">AI 모델을 불러오지 못했어요.<br>인터넷 연결을 확인하고 새로고침(Ctrl+F5) 해 주세요.</div>';
+                    return;
+                }
+            }
+
+            const loadingOverlay = document.getElementById('loading');
+            loadingOverlay.classList.add('opacity-0');
+            setTimeout(() => loadingOverlay.classList.add('hidden'), 300);
+
+            startLoopIfNeeded();
+        }
+
+        function startLoopIfNeeded() {
+            if (!isLoopRunning && detector && video) {
+                isLoopRunning = true;
+                gameLoop();
+            }
+        }
+
+        function selectCharacter(playerNum, charKey) {
+            const char = CHARACTERS[charKey];
+            if (!char) return;
+
+            if (playerNum === 1) {
+                selectedP1 = charKey;
+                document.getElementById('p1-select-preview').textContent = char.emoji;
+                document.getElementById('p1-select-title').textContent = `${char.name} (${char.group})`;
+
+                document.querySelectorAll('.p1-choice-btn').forEach(btn => {
+                    btn.className = 'p1-choice-btn bg-slate-800 border border-slate-600 hover:bg-amber-700 text-slate-200 font-bold rounded-xl p-2 text-xs transition flex items-center justify-center gap-1';
+                });
+                const activeBtn = document.getElementById(`btn-p1-${charKey}`);
+                if (activeBtn) {
+                    activeBtn.className = 'p1-choice-btn bg-amber-600 border-2 border-amber-300 text-white font-bold rounded-xl p-2 text-xs transition flex items-center justify-center gap-1 shadow';
+                }
+            } else {
+                selectedP2 = charKey;
+                document.getElementById('p2-select-preview').textContent = char.emoji;
+                document.getElementById('p2-select-title').textContent = `${char.name} (${char.group})`;
+
+                document.querySelectorAll('.p2-choice-btn').forEach(btn => {
+                    btn.className = 'p2-choice-btn bg-slate-800 border border-slate-600 hover:bg-rose-700 text-slate-200 font-bold rounded-xl p-2 text-xs transition flex items-center justify-center gap-1';
+                });
+                const activeBtn = document.getElementById(`btn-p2-${charKey}`);
+                if (activeBtn) {
+                    activeBtn.className = 'p2-choice-btn bg-rose-600 border-2 border-rose-300 text-white font-bold rounded-xl p-2 text-xs transition flex items-center justify-center gap-1 shadow';
+                }
+            }
+
+            updateTrackUI();
+        }
+
+        function updateTrackUI() {
+            const c1 = CHARACTERS[selectedP1];
+            const c2 = CHARACTERS[selectedP2];
+
+            document.getElementById('top-p1-emoji').textContent = c1.emoji;
+            document.getElementById('top-p1-title').textContent = `P1: ${c1.name}`;
+            document.getElementById('p1-lane-emoji').textContent = c1.emoji;
+            document.getElementById('p1-lane-name').textContent = `P1 (${c1.name})`;
+            document.getElementById('p1-char-icon').textContent = c1.emoji;
+
+            document.getElementById('top-p2-emoji').textContent = c2.emoji;
+            document.getElementById('top-p2-title').textContent = `P2: ${c2.name}`;
+            document.getElementById('p2-lane-emoji').textContent = c2.emoji;
+            document.getElementById('p2-lane-name').textContent = `P2 (${c2.name})`;
+            document.getElementById('p2-char-icon').textContent = c2.emoji;
+
+            updatePositions();
+        }
+
+        function formatDistance(meters) {
+            const m = Math.floor(meters);
+            return m >= 1000 ? `${(m / 1000).toFixed(2)}km` : `${m}m`;
+        }
+
+        function showItemToast(msg) {
+            const toast = document.getElementById('item-toast');
+            toast.textContent = msg;
+            toast.classList.remove('opacity-0', '-translate-y-4');
+            toast.classList.add('opacity-100', 'translate-y-0');
+
+            setTimeout(() => {
+                toast.classList.remove('opacity-100', 'translate-y-0');
+                toast.classList.add('opacity-0', '-translate-y-4');
+            }, 1800);
+        }
+
+        function spawnSkyItem() {
+            if (gameState !== 'RACING') return;
+            const now = Date.now();
+            if (now - lastItemSpawnTime < 1800) return; // Spawn every ~1.8 seconds
+
+            lastItemSpawnTime = now;
+
+            const itemTypes = [
+                { type: 'ice', emoji: '🧊', name: '1초 얼음!' },
+                { type: 'fart', emoji: '💨', name: '지독한 방귀!' },
+                { type: 'crown', emoji: '👑', name: '황금 왕관!' },
+                { type: 'boost', emoji: '⚡', name: '초고속 부스트!' }
+            ];
+
+            const chosen = itemTypes[Math.floor(Math.random() * itemTypes.length)];
+            
+            // Randomly pick P1 side (left) or P2 side (right)
+            const isP1Side = Math.random() < 0.5;
+            const minX = isP1Side ? canvas.width * 0.55 : canvas.width * 0.05;
+            const maxX = isP1Side ? canvas.width * 0.95 : canvas.width * 0.45;
+            const posX = minX + Math.random() * (maxX - minX);
+
+            fallingItems.push({
+                x: posX,
+                y: -30,
+                speed: 3.5 + Math.random() * 2.5,
+                type: chosen.type,
+                emoji: chosen.emoji,
+                name: chosen.name,
+                targetPlayer: isP1Side ? 1 : 2
+            });
+        }
+
+        function applyItemEffect(playerNum, item) {
+            const playerName = playerNum === 1 ? CHARACTERS[selectedP1].name : CHARACTERS[selectedP2].name;
+
+            if (item.type === 'ice') {
+                playFreezeSound();
+                showItemToast(`🧊 P${playerNum} (${playerName}) 1초 동안 얼어붙음!`);
+                if (playerNum === 1) p1Status.freezeTimer = Date.now() + 1000;
+                else p2Status.freezeTimer = Date.now() + 1000;
+            } else if (item.type === 'fart') {
+                playFartSound();
+                showItemToast(`💨 P${playerNum} (${playerName}) 지독한 방귀 분사! 속도 감소!`);
+                if (playerNum === 1) p1Status.fartTimer = Date.now() + 2500;
+                else p2Status.fartTimer = Date.now() + 2500;
+            } else if (item.type === 'crown') {
+                playCrownSound();
+                showItemToast(`👑 P${playerNum} (${playerName}) 황금 왕관 착용! +100m 획득!`);
+                if (playerNum === 1) {
+                    player1Score += 100;
+                    p1Status.crownTimer = Date.now() + 4000;
+                } else {
+                    player2Score += 100;
+                    p2Status.crownTimer = Date.now() + 4000;
+                }
+            } else if (item.type === 'boost') {
+                playBoostSound();
+                showItemToast(`⚡ P${playerNum} (${playerName}) 3초간 2배 속도 부스트!`);
+                if (playerNum === 1) p1Status.boostTimer = Date.now() + 3000;
+                else p2Status.boostTimer = Date.now() + 3000;
+            }
+        }
+
+        function updatePositions() {
+            const p1Percent = Math.min(100, Math.round((player1Score / targetDistance) * 100));
+            const p2Percent = Math.min(100, Math.round((player2Score / targetDistance) * 100));
+
+            document.getElementById('top-p1-dist').textContent = `${p1Percent}% (${formatDistance(player1Score)})`;
+            document.getElementById('top-p2-dist').textContent = `${p2Percent}% (${formatDistance(player2Score)})`;
+
+            document.getElementById('player1-char').style.left = `${2 + (p1Percent * 0.86)}%`;
+            document.getElementById('player2-char').style.left = `${2 + (p2Percent * 0.86)}%`;
+        }
+
+        function triggerBounceAnimation(elemId) {
+            const el = document.getElementById(elemId);
+            if (!el) return;
+            el.classList.add('running-animation');
+            clearTimeout(el.bounceTimer);
+            el.bounceTimer = setTimeout(() => {
+                el.classList.remove('running-animation');
+            }, 200);
+        }
+
+        function calculateMovementSpeed(keypoints, lastYMap) {
+            if (!keypoints || keypoints.length === 0) return 0;
+
+            const armIndices = [5, 6, 7, 8, 9, 10];
+            const legIndices = [11, 12, 13, 14, 15, 16];
+
+            let armDeltaTotal = 0;
+            let armValidCount = 0;
+
+            armIndices.forEach(idx => {
+                const kp = keypoints[idx];
+                if (kp && kp.score > 0.25) {
+                    if (lastYMap[idx] !== undefined) {
+                        const dy = Math.abs(kp.y - lastYMap[idx]);
+                        if (dy > 1.2 && dy < 90) {
+                            armDeltaTotal += dy;
+                            armValidCount++;
+                        }
+                    }
+                    lastYMap[idx] = kp.y;
+                }
+            });
+
+            let legDeltaTotal = 0;
+            let legValidCount = 0;
+
+            legIndices.forEach(idx => {
+                const kp = keypoints[idx];
+                if (kp && kp.score > 0.25) {
+                    if (lastYMap[idx] !== undefined) {
+                        const dy = Math.abs(kp.y - lastYMap[idx]);
+                        if (dy > 1.2 && dy < 90) {
+                            legDeltaTotal += dy;
+                            legValidCount++;
+                        }
+                    }
+                    lastYMap[idx] = kp.y;
+                }
+            });
+
+            const avgArmDelta = armValidCount > 0 ? (armDeltaTotal / armValidCount) : 0;
+            const avgLegDelta = legValidCount > 0 ? (legDeltaTotal / legValidCount) : 0;
+
+            if (avgArmDelta < 1.5 || avgLegDelta < 1.5) return 0;
+
+            const combinedDelta = (avgArmDelta * 0.5) + (avgLegDelta * 0.5);
+            return combinedDelta * 0.9;
+        }
+
+        async function gameLoop() {
+            if (gameState === 'FINISHED') {
+                isLoopRunning = false;
+                return;
+            }
+
+            if (detector && video && video.readyState >= 2) {
+                try {
+                    const poses = await detector.estimatePoses(video);
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                    // Screen Center Divider
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+                    ctx.setLineDash([8, 8]);
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(canvas.width / 2, 0);
+                    ctx.lineTo(canvas.width / 2, canvas.height);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    let foundP1 = false;
+                    let foundP2 = false;
+
+                    let p1Poses = null;
+                    let p2Poses = null;
+
+                    if (poses && poses.length > 0) {
+                        poses.forEach(pose => {
+                            const validPts = pose.keypoints.filter(k => k.score > 0.25);
+                            if (validPts.length < 4) return;
+
+                            const avgX = validPts.reduce((acc, p) => acc + p.x, 0) / validPts.length;
+
+                            if (avgX > canvas.width / 2) {
+                                foundP1 = true;
+                                p1Poses = pose;
+                                drawSkeleton(pose.keypoints, '#f59e0b', 'P1 (왼쪽)', p1Status);
+
+                                if (gameState === 'RACING') {
+                                    const now = Date.now();
+                                    const isFrozen = now < p1Status.freezeTimer;
+                                    
+                                    if (!isFrozen) {
+                                        let multiplier = 1.0;
+                                        if (now < p1Status.fartTimer) multiplier *= 0.4; // Fart slowdown
+                                        if (now < p1Status.boostTimer) multiplier *= 2.0; // Boost speed
+
+                                        const speed1 = calculateMovementSpeed(pose.keypoints, player1LastY);
+                                        if (speed1 > 0) {
+                                            player1Score += speed1 * multiplier;
+                                            triggerBounceAnimation('player1-char');
+                                        }
+                                    }
+                                }
+                            } else {
+                                foundP2 = true;
+                                p2Poses = pose;
+                                drawSkeleton(pose.keypoints, '#e11d48', 'P2 (오른쪽)', p2Status);
+
+                                if (gameState === 'RACING') {
+                                    const now = Date.now();
+                                    const isFrozen = now < p2Status.freezeTimer;
+
+                                    if (!isFrozen) {
+                                        let multiplier = 1.0;
+                                        if (now < p2Status.fartTimer) multiplier *= 0.4; // Fart slowdown
+                                        if (now < p2Status.boostTimer) multiplier *= 2.0; // Boost speed
+
+                                        const speed2 = calculateMovementSpeed(pose.keypoints, player2LastY);
+                                        if (speed2 > 0) {
+                                            player2Score += speed2 * multiplier;
+                                            triggerBounceAnimation('player2-char');
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
+
+                    isP1Detected = foundP1;
+                    isP2Detected = foundP2;
+
+                    updateDetectionUIStatus(foundP1, foundP2);
+
+                    // RACING MODE: Sky Items falling & hit test
+                    if (gameState === 'RACING') {
+                        spawnSkyItem();
+
+                        for (let i = fallingItems.length - 1; i >= 0; i--) {
+                            const item = fallingItems[i];
+                            item.y += item.speed;
+
+                            // Draw Falling Item Emoji
+                            ctx.save();
+                            ctx.font = '36px sans-serif';
+                            ctx.textAlign = 'center';
+                            ctx.fillText(item.emoji, item.x, item.y);
+                            ctx.restore();
+
+                            // Check collision with player pose keypoints
+                            let hit = false;
+                            const targetPose = item.targetPlayer === 1 ? p1Poses : p2Poses;
+
+                            if (targetPose && targetPose.keypoints) {
+                                for (let kp of targetPose.keypoints) {
+                                    if (kp.score > 0.25) {
+                                        const dist = Math.hypot(kp.x - item.x, kp.y - item.y);
+                                        if (dist < 45) {
+                                            hit = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (hit) {
+                                applyItemEffect(item.targetPlayer, item);
+                                fallingItems.splice(i, 1);
+                            } else if (item.y > canvas.height + 40) {
+                                fallingItems.splice(i, 1); // Missed item
+                            }
+                        }
+                    }
+
+                    if (gameState === 'MOTION_CHECK') {
+                        if (foundP1 && foundP2) {
+                            if (!bothDetectedTimer) {
+                                bothDetectedTimer = setTimeout(() => {
+                                    if (gameState === 'MOTION_CHECK' && isP1Detected && isP2Detected) {
+                                        startRaceCountdown();
+                                    }
+                                }, 1200);
+                            }
+                        } else {
+                            if (bothDetectedTimer) {
+                                clearTimeout(bothDetectedTimer);
+                                bothDetectedTimer = null;
+                            }
+                        }
+                    }
+
+                    if (gameState === 'RACING') {
+                        updatePositions();
+                        checkWinner();
+                    }
+                } catch (e) {
+                    console.error('Pose loop error:', e);
+                }
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function updateDetectionUIStatus(p1OK, p2OK) {
+            const selP1 = document.getElementById('select-p1-status');
+            const selP2 = document.getElementById('select-p2-status');
+
+            if (p1OK) {
+                selP1.className = 'px-3 py-1 rounded-full bg-emerald-900/80 text-emerald-300 border border-emerald-500 font-bold flex items-center gap-1';
+                selP1.innerHTML = '🟢 감지 완료 (준비됨)';
+            } else {
+                selP1.className = 'px-3 py-1 rounded-full bg-rose-900/80 text-rose-300 border border-rose-500 font-bold flex items-center gap-1';
+                selP1.innerHTML = '🔴 감지 안됨';
+            }
+
+            if (p2OK) {
+                selP2.className = 'px-3 py-1 rounded-full bg-emerald-900/80 text-emerald-300 border border-emerald-500 font-bold flex items-center gap-1';
+                selP2.innerHTML = '🟢 감지 완료 (준비됨)';
+            } else {
+                selP2.className = 'px-3 py-1 rounded-full bg-rose-900/80 text-rose-300 border border-rose-500 font-bold flex items-center gap-1';
+                selP2.innerHTML = '🔴 감지 안됨';
+            }
+
+            const mP1Badge = document.getElementById('motion-p1-badge');
+            const mP1Text = document.getElementById('motion-p1-text');
+            const mP2Badge = document.getElementById('motion-p2-badge');
+            const mP2Text = document.getElementById('motion-p2-text');
+
+            if (p1OK) {
+                mP1Badge.className = 'px-4 py-1.5 rounded-xl bg-emerald-950/80 border border-emerald-500 text-emerald-300 font-jua text-base flex items-center gap-2';
+                mP1Text.textContent = '감지 완료! 🟢';
+            } else {
+                mP1Badge.className = 'px-4 py-1.5 rounded-xl bg-rose-950/80 border border-rose-500 text-rose-300 font-jua text-base flex items-center gap-2';
+                mP1Text.textContent = '미인식 ❌ (왼쪽에 서세요)';
+            }
+
+            if (p2OK) {
+                mP2Badge.className = 'px-4 py-1.5 rounded-xl bg-emerald-950/80 border border-emerald-500 text-emerald-300 font-jua text-base flex items-center gap-2';
+                mP2Text.textContent = '감지 완료! 🟢';
+            } else {
+                mP2Badge.className = 'px-4 py-1.5 rounded-xl bg-rose-950/80 border border-rose-500 text-rose-300 font-jua text-base flex items-center gap-2';
+                mP2Text.textContent = '미인식 ❌ (오른쪽에 서세요)';
+            }
+        }
+
+        function drawSkeleton(keypoints, color, labelText, statusObj) {
+            const now = Date.now();
+            const isFrozen = statusObj && now < statusObj.freezeTimer;
+            const hasCrown = statusObj && now < statusObj.crownTimer;
+            const hasFart = statusObj && now < statusObj.fartTimer;
+            const hasBoost = statusObj && now < statusObj.boostTimer;
+
+            ctx.fillStyle = isFrozen ? '#38bdf8' : color;
+            ctx.strokeStyle = isFrozen ? '#0284c7' : color;
+            ctx.lineWidth = 4;
+
+            const adjacentPairs = poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet);
+            adjacentPairs.forEach(([i, j]) => {
+                const kp1 = keypoints[i];
+                const kp2 = keypoints[j];
+                if (kp1 && kp2 && kp1.score > 0.25 && kp2.score > 0.25) {
+                    ctx.beginPath();
+                    ctx.moveTo(kp1.x, kp1.y);
+                    ctx.lineTo(kp2.x, kp2.y);
+                    ctx.stroke();
+                }
+            });
+
+            let headX = null;
+            let headY = null;
+            let hipX = null;
+            let hipY = null;
+
+            keypoints.forEach(kp => {
+                if (kp && kp.score > 0.25) {
+                    ctx.beginPath();
+                    ctx.arc(kp.x, kp.y, 6, 0, 2 * Math.PI);
+                    ctx.fill();
+
+                    if (kp.name === 'nose') {
+                        headX = kp.x;
+                        headY = kp.y;
+                    }
+                    if (kp.name === 'left_hip' || kp.name === 'right_hip') {
+                        hipX = kp.x;
+                        hipY = kp.y;
+                    }
+                }
+            });
+
+            // Crown overlay on nose/head
+            if (headX !== null && headY !== null && hasCrown) {
+                ctx.save();
+                ctx.translate(headX, headY);
+                ctx.scale(-1, 1);
+                ctx.font = '45px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('👑', 0, -40);
+                ctx.restore();
+            }
+
+            // Fart cloud overlay on hips
+            if (hipX !== null && hipY !== null && hasFart) {
+                ctx.save();
+                ctx.translate(hipX, hipY);
+                ctx.scale(-1, 1);
+                ctx.font = '50px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('💨', 0, 10);
+                ctx.restore();
+            }
+
+            // Ice freeze box overlay
+            if (headX !== null && headY !== null && isFrozen) {
+                ctx.save();
+                ctx.translate(headX, headY);
+                ctx.scale(-1, 1);
+                ctx.font = '60px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('🧊', 0, 20);
+                ctx.restore();
+            }
+
+            // Speed Boost aura
+            if (headX !== null && headY !== null && hasBoost) {
+                ctx.save();
+                ctx.translate(headX, headY);
+                ctx.scale(-1, 1);
+                ctx.font = '40px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('⚡', 35, -20);
+                ctx.restore();
+            }
+
+            // TEXT FLIP CORRECTION for label
+            if (headX !== null && headY !== null && labelText) {
+                ctx.save();
+                ctx.translate(headX, headY);
+                ctx.scale(-1, 1);
+                ctx.font = 'bold 20px "Noto Sans KR", sans-serif';
+                ctx.fillStyle = '#ffffff';
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = 4;
+                ctx.textAlign = 'center';
+                ctx.strokeText(labelText, 0, -25);
+                ctx.fillText(labelText, 0, -25);
+                ctx.restore();
+            }
+        }
+
+        function checkWinner() {
+            if (player1Score >= targetDistance || player2Score >= targetDistance) {
+                gameState = 'FINISHED';
+
+                const isP1Win = player1Score >= player2Score;
+                const winnerChar = isP1Win ? CHARACTERS[selectedP1] : CHARACTERS[selectedP2];
+                const winnerPlayerNum = isP1Win ? 'Player 1' : 'Player 2';
+
+                playVictorySound();
+
+                confetti({
+                    particleCount: 150,
+                    spread: 90,
+                    origin: { y: 0.6 }
+                });
+
+                document.getElementById('winner-emoji').textContent = winnerChar.emoji;
+                document.getElementById('winner-text').textContent = `${winnerPlayerNum} (${winnerChar.name}) 승리! 🎉`;
+                document.getElementById('winner-sub').textContent = `${winnerChar.group}의 훌륭한 정복 승리입니다!`;
+
+                document.getElementById('winner-banner').classList.remove('hidden');
+                document.getElementById('reset-button').classList.add('hidden');
+                document.getElementById('motion-check-screen').classList.add('hidden');
+            }
+        }
+
+        function switchToMotionScreen() {
+            document.getElementById('character-select-modal').classList.add('hidden');
+            document.getElementById('motion-check-screen').classList.remove('hidden');
+            document.getElementById('reset-button').classList.remove('hidden');
+
+            targetDistance = parseInt(document.getElementById('distance-select').value) || 1000;
+            player1Score = 0;
+            player2Score = 0;
+            player1LastY = {};
+            player2LastY = {};
+            fallingItems = [];
+            p1Status = { freezeTimer: 0, crownTimer: 0, fartTimer: 0, boostTimer: 0 };
+            p2Status = { freezeTimer: 0, crownTimer: 0, fartTimer: 0, boostTimer: 0 };
+            updateTrackUI();
+
+            gameState = 'MOTION_CHECK';
+            bothDetectedTimer = null;
+            startLoopIfNeeded();
+        }
+
+        function cancelMotionCheck() {
+            gameState = 'PREVIEW';
+            if (bothDetectedTimer) clearTimeout(bothDetectedTimer);
+            bothDetectedTimer = null;
+
+            document.getElementById('motion-check-screen').classList.add('hidden');
+            document.getElementById('character-select-modal').classList.remove('hidden');
+            document.getElementById('reset-button').classList.add('hidden');
+            startLoopIfNeeded();
+        }
+
+        function startRaceCountdown() {
+            gameState = 'COUNTDOWN';
+            document.getElementById('motion-check-screen').classList.add('hidden');
+
+            const countdownEl = document.getElementById('countdown');
+            countdownEl.classList.remove('hidden');
+
+            let count = 3;
+            countdownEl.textContent = count;
+            playBeep(523.25, 'sine', 0.2);
+
+            const timer = setInterval(() => {
+                count--;
+                if (count > 0) {
+                    countdownEl.textContent = count;
+                    countdownEl.classList.remove('animate-count');
+                    void countdownEl.offsetWidth;
+                    countdownEl.classList.add('animate-count');
+                    playBeep(523.25, 'sine', 0.2);
+                } else if (count === 0) {
+                    countdownEl.textContent = '출발! 🏃‍♂️';
+                    playBeep(783.99, 'triangle', 0.4);
+                } else {
+                    clearInterval(timer);
+                    countdownEl.classList.add('hidden');
+                    gameState = 'RACING';
+                }
+            }, 1000);
+        }
+
+        function resetGame() {
+            if (bothDetectedTimer) clearTimeout(bothDetectedTimer);
+            bothDetectedTimer = null;
+
+            player1Score = 0;
+            player2Score = 0;
+            player1LastY = {};
+            player2LastY = {};
+            fallingItems = [];
+            p1Status = { freezeTimer: 0, crownTimer: 0, fartTimer: 0, boostTimer: 0 };
+            p2Status = { freezeTimer: 0, crownTimer: 0, fartTimer: 0, boostTimer: 0 };
+            updateTrackUI();
+            if (ctx && canvas) ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            document.getElementById('motion-check-screen').classList.add('hidden');
+            document.getElementById('countdown').classList.add('hidden');
+            document.getElementById('winner-banner').classList.add('hidden');
+            document.getElementById('character-select-modal').classList.remove('hidden');
+            document.getElementById('reset-button').classList.add('hidden');
+
+            gameState = 'PREVIEW';
+            startLoopIfNeeded();
+        }
+
+        document.getElementById('start-button').addEventListener('click', switchToMotionScreen);
+        document.getElementById('cancel-motion-btn').addEventListener('click', cancelMotionCheck);
+        document.getElementById('restart-button').addEventListener('click', resetGame);
+        document.getElementById('reset-button').addEventListener('click', resetGame);
+
+        window.addEventListener('DOMContentLoaded', async () => {
+            selectCharacter(1, 'inca_llama');
+            selectCharacter(2, 'spanish_knight');
+            updateTrackUI();
+
+            await setupCameraFast();
+            loadModelFast();
+        });
+    </script>
+</body>
+</html>

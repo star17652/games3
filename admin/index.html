@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex">
+  <title>선생님 메뉴 - 게임 비밀번호</title>
+  <script src="../gate.js"></script>
+  <style>
+    :root { --bg: #0d0b1a; --panel: #17142b; --line: #2c2750; --text: #f4f1ff; --muted: #a9a3c7; --gold: #ffe066; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
+      font-family: 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; }
+    main { max-width: 1000px; margin: 0 auto; padding: 40px 20px 60px; }
+    h1 { font-size: clamp(30px, 5vw, 44px); margin: 0 0 6px; }
+    .sub { color: var(--muted); margin: 0 0 28px; }
+    .panel { background: var(--panel); border: 2px solid var(--line); border-radius: 18px; padding: 24px; }
+    input, select, button { font-family: inherit; font-size: 18px; border-radius: 10px; }
+    input, select { padding: 12px 14px; border: 2px solid #3a3560; background: var(--bg); color: #fff; }
+    input:focus, select:focus { outline: none; border-color: var(--gold); }
+    button { padding: 12px 20px; border: none; background: var(--gold); color: #140f24; font-weight: 700; cursor: pointer; }
+    button.ghost { background: #2c2750; color: var(--text); }
+    button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+    #login { max-width: 420px; }
+    #login label { display: block; margin-bottom: 8px; color: var(--muted); }
+    #login .row { display: flex; gap: 10px; }
+    #login input { flex: 1; min-width: 0; }
+    .err { color: #ff8fa3; min-height: 22px; margin-top: 10px; }
+
+    #dash { display: none; }
+    .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 20px; }
+    .controls label { color: var(--muted); }
+    .expires { margin: 0 0 20px; font-size: 17px; }
+    .expires b { color: var(--gold); }
+    .codes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+    @media (max-width: 700px) { .codes { grid-template-columns: 1fr; } }
+    .code-card { background: var(--bg); border: 2px solid var(--line); border-radius: 16px; padding: 20px; }
+    .code-card .name { color: var(--muted); font-size: 17px; }
+    .code-card .code { font-size: clamp(44px, 7vw, 64px); font-weight: 800; letter-spacing: 8px; color: var(--gold);
+      font-variant-numeric: tabular-nums; margin-top: 4px; }
+    .note { color: var(--muted); font-size: 14px; line-height: 1.7; margin-top: 22px; }
+    details { margin-top: 28px; color: var(--muted); }
+    details summary { cursor: pointer; }
+    details .row { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+    #newhash { margin-top: 10px; word-break: break-all; color: var(--text); }
+    body.present .controls, body.present .note, body.present details, body.present h1, body.present .sub { display: none; }
+    body.present .code-card .code { font-size: clamp(60px, 10vw, 110px); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>선생님 메뉴</h1>
+    <p class="sub">게임별 입장 비밀번호를 만들어 아이들에게 알려주세요.</p>
+
+    <section class="panel" id="login">
+      <label for="pw">관리자 비밀번호</label>
+      <div class="row">
+        <input id="pw" type="password" autocomplete="current-password">
+        <button id="login-btn">확인</button>
+      </div>
+      <div class="err" id="login-err" role="alert"></div>
+    </section>
+
+    <section id="dash">
+      <div class="controls">
+        <label for="dur">유효 시간</label>
+        <select id="dur">
+          <option value="30">30분</option>
+          <option value="60" selected>1시간</option>
+          <option value="120">2시간</option>
+          <option value="day">오늘 하루</option>
+        </select>
+        <button id="new-btn">새 비밀번호 만들기</button>
+        <button id="present-btn" class="ghost">크게 보기</button>
+      </div>
+      <p class="expires">이 비밀번호는 <b id="exp-text"></b>까지 사용할 수 있어요.</p>
+      <div class="codes" id="codes"></div>
+      <p class="note">
+        · 이 창을 닫았다가 다시 열면 새 비밀번호가 만들어져요.<br>
+        · 이전 비밀번호는 정해진 유효 시간이 지나면 자동으로 막혀요.<br>
+        · 아이들이 한 번 입장하면 그 창을 닫기 전까지는 새로고침해도 다시 묻지 않아요.
+      </p>
+      <details>
+        <summary>관리자 비밀번호 바꾸기</summary>
+        <div class="row">
+          <input id="newpw" type="text" placeholder="새 관리자 비밀번호">
+          <button id="hash-btn" class="ghost">값 만들기</button>
+        </div>
+        <div id="newhash"></div>
+      </details>
+    </section>
+  </main>
+
+  <script>
+    const G = window.ClassGate;
+    const $ = id => document.getElementById(id);
+    const SESSION_KEY = 'classgate_admin';
+
+    function formatTime(minute) {
+      const d = new Date(minute * 60000);
+      const hh = String(d.getHours()).padStart(2, '0'), mm = String(d.getMinutes()).padStart(2, '0');
+      return `${d.getMonth() + 1}월 ${d.getDate()}일 ${hh}:${mm}`;
+    }
+
+    function render(issue, dur) {
+      const d = dur === 'day' ? 'day' : Number(dur);
+      $('codes').innerHTML = '';
+      G.CONFIG.GAMES.forEach(g => {
+        const card = document.createElement('div');
+        card.className = 'code-card';
+        card.innerHTML = '<div class="name"></div><div class="code"></div>';
+        card.querySelector('.name').textContent = g.name;
+        card.querySelector('.code').textContent = G.makeCode(g.folder, issue, d);
+        $('codes').appendChild(card);
+      });
+      $('exp-text').textContent = formatTime(G.expiryOf(issue, d));
+      $('dur').value = String(dur);
+    }
+
+    // 같은 창에서는 새로고침해도 같은 비밀번호 유지, 창을 닫으면 새로 만들어짐
+    function newSession(dur) {
+      const s = { issue: G.nowMinute(), dur: String(dur) };
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify(s));
+      render(s.issue, s.dur);
+    }
+
+    function showDashboard() {
+      $('login').style.display = 'none';
+      $('dash').style.display = 'block';
+      let s = null;
+      try { s = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null'); } catch (e) { }
+      if (s && s.issue) render(s.issue, s.dur);
+      else newSession($('dur').value);
+    }
+
+    function login() {
+      if (G.adminHash($('pw').value) === G.CONFIG.ADMIN_HASH) {
+        sessionStorage.setItem(SESSION_KEY + '_ok', '1');
+        showDashboard();
+      } else {
+        $('login-err').textContent = '비밀번호가 맞지 않아요.';
+      }
+    }
+
+    $('login-btn').addEventListener('click', login);
+    $('pw').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+    $('new-btn').addEventListener('click', () => newSession($('dur').value));
+    $('dur').addEventListener('change', () => newSession($('dur').value));
+    $('present-btn').addEventListener('click', () => {
+      document.body.classList.toggle('present');
+      $('present-btn').textContent = document.body.classList.contains('present') ? '작게 보기' : '크게 보기';
+    });
+    // 크게 보기에서는 버튼이 숨겨지므로 ESC로 돌아오기
+    window.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && document.body.classList.contains('present')) $('present-btn').click();
+    });
+    $('hash-btn').addEventListener('click', () => {
+      const v = $('newpw').value;
+      if (!v) return;
+      $('newhash').innerHTML = 'gate.js 파일의 <b>ADMIN_HASH</b> 값을 아래로 바꿔서 올리세요:<br><code></code>';
+      $('newhash').querySelector('code').textContent = "ADMIN_HASH: '" + G.adminHash(v) + "',";
+    });
+
+    if (sessionStorage.getItem(SESSION_KEY + '_ok') === '1') showDashboard();
+    else $('pw').focus();
+  </script>
+</body>
+</html>

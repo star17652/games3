@@ -1,0 +1,1156 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <script src="../gate.js" data-lock="1"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>잉카 vs 스페인 - 2인 모션 격투</title>
+
+
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+
+  <style>
+    :root {
+      --gold: #f5b700;
+      --crimson: #e63946;
+      --steel: #c7ced8;
+      --ink: #06070b;
+      --panel: rgba(12, 10, 8, 0.93);
+      --ok: #4ade80;
+      --display: 'Black Han Sans', 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+      --body: 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ink); color: #fff; font-family: var(--body); }
+
+    #video, #canvas {
+      position: fixed; inset: 0; width: 100%; height: 100%;
+      object-fit: cover; transform: scaleX(-1);
+    }
+    #video { z-index: 1; }
+    #canvas { z-index: 2; pointer-events: none; }
+
+    #center-line {
+      position: fixed; top: 0; left: 50%; height: 100%; width: 6px; transform: translateX(-50%);
+      background: linear-gradient(180deg, transparent, rgba(255, 60, 60, 0.9) 50%, transparent);
+      z-index: 3; display: none;
+    }
+
+    #game-ui { display: none; }
+    .hud { position: fixed; top: 18px; width: 42%; z-index: 5; }
+    #p1-hud { left: 3%; }
+    #p2-hud { right: 3%; text-align: right; }
+    .hp-frame {
+      height: 30px; border: 3px solid #fff; border-radius: 6px; overflow: hidden;
+      background: rgba(0,0,0,0.65); transform: skewX(-12deg);
+    }
+    #p2-hud .hp-frame { transform: skewX(12deg); }
+    .hp-bar { height: 100%; width: 100%; background: var(--ok); transition: width .2s, background .2s; }
+    #p1-hp { float: right; }
+    #p2-hp { float: left; }
+    .hp-frame.shake { animation: shake .3s; }
+    @keyframes shake {
+      0%,100% { translate: 0 0; } 25% { translate: -8px 2px; } 50% { translate: 8px -2px; } 75% { translate: -4px 0; }
+    }
+    .name { font-family: var(--display); font-size: 26px; margin-top: 8px; text-shadow: 2px 2px 0 #000; }
+    .name small { font-family: var(--body); font-size: 14px; color: #ccc; margin: 0 6px; }
+    .charge { display: inline-flex; gap: 5px; margin-top: 6px; }
+    .charge i { width: 22px; height: 10px; border-radius: 2px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); }
+    .charge i.on { background: #ffd23f; box-shadow: 0 0 8px #ffd23f; }
+    .line-warn {
+      display: none; margin-top: 8px; font-weight: 700; color: #fff; background: rgba(220, 38, 38, 0.85);
+      padding: 4px 10px; border-radius: 6px; font-size: 15px; width: fit-content;
+    }
+    #p2-hud .line-warn { margin-left: auto; }
+
+    #center-msg {
+      position: fixed; top: 42%; left: 50%; transform: translate(-50%, -50%); z-index: 20;
+      font-family: var(--display); font-size: clamp(50px, 11vw, 150px); color: #ffd23f;
+      -webkit-text-stroke: 4px #000; text-shadow: 0 0 30px rgba(255, 210, 63, 0.7);
+      display: none; pointer-events: none; white-space: nowrap;
+    }
+
+    /* 메뉴 */
+    #menu {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 100;
+      width: min(640px, 94vw); max-height: 94vh; overflow-y: auto;
+      background: var(--panel); border: 2px solid rgba(245, 183, 0, 0.35); border-radius: 18px; padding: 26px;
+    }
+    #menu h1 {
+      font-family: var(--display); font-weight: 400; font-size: clamp(36px, 8vw, 56px); line-height: 1.05;
+      margin: 0 0 4px;
+    }
+    #menu h1 .vs { color: #fff; font-size: 0.6em; margin: 0 10px; }
+    #menu h1 .inca { color: var(--gold); }
+    #menu h1 .spain { color: var(--steel); }
+    #menu .sub { margin: 0 0 18px; color: #b9b2a4; font-size: 15px; }
+
+    .pick-title { font-weight: 700; margin: 0 0 8px; font-size: 15px; }
+    .pick-hint { color: #b9b2a4; font-size: 13px; margin: 0 0 10px; }
+    .factions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
+    .faction {
+      position: relative; border: 3px solid rgba(255,255,255,0.15); border-radius: 14px;
+      background: rgba(255,255,255,0.04); padding: 10px 10px 12px; cursor: pointer; color: #fff;
+      font-family: var(--body); text-align: center;
+    }
+    .faction canvas { width: 100%; height: auto; display: block; }
+    .faction .fname { font-family: var(--display); font-size: 24px; margin-top: 4px; }
+    .faction[data-f="inca"] .fname { color: var(--gold); }
+    .faction[data-f="spain"] .fname { color: var(--steel); }
+    .faction .badge {
+      position: absolute; top: 8px; left: 8px; font-size: 12px; font-weight: 700; padding: 3px 8px; border-radius: 6px;
+      background: #333; color: #ddd;
+    }
+    .faction.p1 { border-color: #ffd23f; background: rgba(255, 210, 63, 0.1); }
+    .faction.p1 .badge { background: #ffd23f; color: #000; }
+    .faction:focus-visible { outline: 3px solid #ffd23f; outline-offset: 2px; }
+
+    .status { display: flex; gap: 18px; margin-bottom: 14px; font-size: 14px; color: #ccd; flex-wrap: wrap; }
+    .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #666; margin-right: 6px; vertical-align: middle; }
+    .dot.wait { background: #fbbf24; animation: blink 1s infinite; }
+    .dot.ok { background: var(--ok); }
+    .dot.err { background: var(--crimson); }
+    @keyframes blink { 50% { opacity: .3; } }
+
+    .btn {
+      width: 100%; padding: 15px; border-radius: 10px; border: none; cursor: pointer;
+      font-family: var(--display); font-size: 22px; color: #fff; margin-bottom: 12px;
+    }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+    .btn:focus-visible, select:focus-visible { outline: 3px solid #ffd23f; outline-offset: 2px; }
+    #cam-btn { background: #3a3326; }
+    #cam-btn.done { background: #1f5134; }
+    #start-btn, #restart-btn { background: linear-gradient(90deg, #b8860b, #a4161a); }
+    #camera-group { margin-bottom: 12px; }
+    #camera-group label { display: block; font-size: 14px; color: #ccd; margin-bottom: 6px; }
+    select { width: 100%; padding: 12px; border-radius: 10px; font-size: 15px; font-family: var(--body); }
+
+    #error-box {
+      display: none; background: rgba(220, 38, 38, 0.15); border: 1px solid var(--crimson); color: #ffd7d7;
+      padding: 14px; border-radius: 10px; font-size: 14px; line-height: 1.6; margin-bottom: 14px;
+    }
+    #error-box b { color: #fff; }
+
+    .howto { font-size: 14px; line-height: 1.75; background: rgba(255,255,255,0.06); padding: 14px 16px; border-radius: 10px; }
+    .howto p { margin: 0; }
+
+    #result {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 200;
+      background: var(--panel); border: 2px solid var(--gold); border-radius: 18px; padding: 34px 44px;
+      text-align: center; display: none; width: min(480px, 90vw);
+    }
+    #result h2 { font-family: var(--display); font-weight: 400; font-size: 46px; margin: 0 0 20px; color: var(--gold); }
+    #to-menu-btn { background: #3a3326; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .hp-frame.shake, .dot.wait { animation: none; }
+    }
+  </style>
+</head>
+<body>
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas" width="1280" height="720"></canvas>
+  <div id="center-line"></div>
+
+  <div id="game-ui">
+    <div class="hud" id="p1-hud">
+      <div class="hp-frame" id="p1-frame"><div class="hp-bar" id="p1-hp"></div></div>
+      <div class="name"><span id="p1-name">잉카 제국</span><small id="p1-seen"></small></div>
+      <div class="charge" id="p1-charge"></div>
+      <div class="line-warn" id="p1-warn">중앙선 넘음! 체력 감소 중</div>
+    </div>
+    <div class="hud" id="p2-hud">
+      <div class="hp-frame" id="p2-frame"><div class="hp-bar" id="p2-hp"></div></div>
+      <div class="name"><small id="p2-seen"></small><span id="p2-name">스페인 정복군</span></div>
+      <div class="charge" id="p2-charge"></div>
+      <div class="line-warn" id="p2-warn">중앙선 넘음! 체력 감소 중</div>
+    </div>
+  </div>
+
+  <div id="center-msg"></div>
+
+  <div id="menu">
+    <h1><span class="inca">잉카</span><span class="vs">VS</span><span class="spain">스페인</span></h1>
+    <p class="sub">1532년 카하마르카, 태양의 제국과 강철의 군대가 맞붙는다</p>
+
+    <p class="pick-title">내 진영 고르기</p>
+    <p class="pick-hint">고른 진영은 화면 왼쪽(PLAYER 1)이 맡고, 오른쪽 사람은 자동으로 상대 진영이 됩니다.</p>
+    <div class="factions">
+      <button class="faction" data-f="inca" id="pick-inca">
+        <span class="badge">P1</span>
+        <canvas width="300" height="200" id="preview-inca"></canvas>
+        <div class="fname">잉카 제국</div>
+      </button>
+      <button class="faction" data-f="spain" id="pick-spain">
+        <span class="badge">P2</span>
+        <canvas width="300" height="200" id="preview-spain"></canvas>
+        <div class="fname">스페인 정복군</div>
+      </button>
+    </div>
+
+    <div class="status">
+      <span><span class="dot wait" id="model-dot"></span><span id="model-text">AI 모델 불러오는 중</span></span>
+      <span><span class="dot" id="cam-dot"></span><span id="cam-text">카메라 꺼짐</span></span>
+    </div>
+
+    <div id="error-box"></div>
+
+    <button class="btn" id="cam-btn" style="display:none">📷 카메라 켜기</button>
+
+    <div id="camera-group">
+      <label for="camera-select">사용할 카메라</label>
+      <select id="camera-select"><option value="">카메라 불러오는 중...</option></select>
+    </div>
+
+    <button class="btn" id="start-btn" disabled>게임 시작</button>
+
+    <div class="howto">
+      <p>🤜 <b>장풍:</b> 왼팔을 굽혔다가 앞으로 쭉 뻗기 (0.5초마다 1발)</p>
+      <p>🛡️ <b>방패:</b> 오른손에 진영 방패가 있어요. 장풍과 벼락을 막을 수 있어요</p>
+      <p>⚡ <b>벼락:</b> 스쿼트 5번 → 상대 머리 위에 경고 표시 후 1초 뒤 벼락이 떨어져요. 방패를 머리 위로 올려 막으세요</p>
+      <p>⚠️ <b>중앙선:</b> 상대 영역으로 넘어가면 체력이 깎여요</p>
+      <p>📏 두 사람 모두 발끝까지 보이도록 카메라에서 약 3m 떨어져 서세요. ESC를 누르면 메뉴로 돌아가요</p>
+    </div>
+  </div>
+
+  <div id="result">
+    <h2 id="result-text">잉카 제국 승리!</h2>
+    <button class="btn" id="restart-btn">다시 하기</button>
+    <button class="btn" id="to-menu-btn">메뉴로</button>
+  </div>
+
+  <script>
+  // ================== 설정값 ==================
+  const CONFIG = {
+    KP_MIN: 0.3,
+    FIREBALL_SPEED: 650,
+    FIREBALL_RADIUS: 28,
+    FIREBALL_DMG: 10,
+    PUNCH_COOLDOWN: 500,
+    SHIELD_RADIUS: 70,
+    SQUATS_FOR_SPECIAL: 5,
+    LIGHTNING_WARN: 1000,
+    LIGHTNING_SPEED: 1500,
+    LIGHTNING_W: 60,
+    LIGHTNING_H: 170,
+    LIGHTNING_DMG: 30,
+    LINE_MARGIN: 20,
+    LINE_DMG_PER_SEC: 15,
+    COUNTDOWN_MS: 3000,
+    HAT_SCALE: 1.0            // 모자가 너무 크거나 작으면 이 값 조절
+  };
+
+  // ================== 그리기 도우미 ==================
+  function rr(c, x, y, w, h, r) {
+    c.beginPath();
+    c.moveTo(x + r, y);
+    c.lineTo(x + w - r, y); c.quadraticCurveTo(x + w, y, x + w, y + r);
+    c.lineTo(x + w, y + h - r); c.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    c.lineTo(x + r, y + h); c.quadraticCurveTo(x, y + h, x, y + h - r);
+    c.lineTo(x, y + r); c.quadraticCurveTo(x, y, x + r, y);
+    c.closePath();
+  }
+
+  // ---------- 잉카: 황금 태양 왕관 (원점 = 이마 위, s = 머리 너비) ----------
+  function drawIncaCrown(c, s) {
+    // 1) 뒤쪽 깃털 부채
+    const feathers = [[-0.62, '#c1121f'], [-0.31, '#2a9d4b'], [0, '#f7c600'], [0.31, '#2a9d4b'], [0.62, '#c1121f']];
+    feathers.forEach(([a, col]) => {
+      c.save();
+      c.translate(0, -0.15 * s);
+      c.rotate(a);
+      c.beginPath();
+      c.ellipse(0, -0.62 * s, 0.12 * s, 0.5 * s, 0, 0, Math.PI * 2);
+      c.fillStyle = col; c.fill();
+      c.lineWidth = Math.max(1, s * 0.015); c.strokeStyle = 'rgba(0,0,0,0.45)'; c.stroke();
+      c.beginPath(); c.moveTo(0, -0.15 * s); c.lineTo(0, -1.08 * s);
+      c.strokeStyle = 'rgba(255,255,255,0.55)'; c.stroke();
+      c.restore();
+    });
+
+    // 2) 태양신 인티 원반
+    const cy = -0.4 * s, R = 0.25 * s;
+    c.fillStyle = '#f5b700';
+    for (let i = 0; i < 12; i++) {
+      const a = i * Math.PI / 6;
+      c.beginPath();
+      c.moveTo(Math.cos(a - 0.14) * R * 0.9, cy + Math.sin(a - 0.14) * R * 0.9);
+      c.lineTo(Math.cos(a) * R * 1.6, cy + Math.sin(a) * R * 1.6);
+      c.lineTo(Math.cos(a + 0.14) * R * 0.9, cy + Math.sin(a + 0.14) * R * 0.9);
+      c.closePath(); c.fill();
+    }
+    const g = c.createRadialGradient(-R * 0.3, cy - R * 0.3, R * 0.1, 0, cy, R);
+    g.addColorStop(0, '#fff3b0'); g.addColorStop(0.5, '#f5c400'); g.addColorStop(1, '#a87400');
+    c.beginPath(); c.arc(0, cy, R, 0, Math.PI * 2);
+    c.fillStyle = g; c.fill();
+    c.lineWidth = Math.max(1.5, s * 0.025); c.strokeStyle = '#6b4a00'; c.stroke();
+    c.beginPath(); c.arc(0, cy, R * 0.66, 0, Math.PI * 2); c.stroke();
+    c.fillStyle = '#6b4a00';
+    c.fillRect(-R * 0.32, cy - R * 0.18, R * 0.2, R * 0.09);
+    c.fillRect(R * 0.12, cy - R * 0.18, R * 0.2, R * 0.09);
+    c.fillRect(-R * 0.05, cy - R * 0.08, R * 0.1, R * 0.22);
+    c.fillRect(-R * 0.22, cy + R * 0.22, R * 0.44, R * 0.08);
+
+    // 3) 황금 머리띠 + 토카푸(잉카 기하학 문양)
+    const bw = 1.12 * s, bh = 0.22 * s, by = -0.14 * s;
+    const bg = c.createLinearGradient(0, by, 0, by + bh);
+    bg.addColorStop(0, '#ffe27a'); bg.addColorStop(0.5, '#e0a800'); bg.addColorStop(1, '#8f6100');
+    rr(c, -bw / 2, by, bw, bh, bh * 0.3);
+    c.fillStyle = bg; c.fill();
+    c.lineWidth = Math.max(1.5, s * 0.02); c.strokeStyle = '#5c3f00'; c.stroke();
+    const n = 7, cell = bw / n;
+    for (let i = 0; i < n; i++) {
+      const x = -bw / 2 + cell * (i + 0.5), y = by + bh / 2, d = bh * 0.3;
+      c.fillStyle = i % 2 ? '#1d1d1d' : '#b5171f';
+      c.beginPath();
+      if (i % 2) { // 계단 문양
+        c.moveTo(x - d, y + d); c.lineTo(x - d, y); c.lineTo(x, y); c.lineTo(x, y - d);
+        c.lineTo(x + d, y - d); c.lineTo(x + d, y + d); c.closePath();
+      } else {     // 마름모
+        c.moveTo(x, y - d); c.lineTo(x + d, y); c.lineTo(x, y + d); c.lineTo(x - d, y); c.closePath();
+      }
+      c.fill();
+    }
+
+    // 4) 사파 잉카(황제)의 붉은 술 장식 '마스카이파차'
+    c.strokeStyle = '#c1121f';
+    c.lineWidth = Math.max(2, s * 0.04);
+    c.lineCap = 'round';
+    for (let i = -5; i <= 5; i++) {
+      const x = i * s * 0.075;
+      c.beginPath(); c.moveTo(x, by + bh); c.lineTo(x, by + bh + 0.2 * s); c.stroke();
+    }
+    c.lineCap = 'butt';
+  }
+
+  // ---------- 스페인: 모리온 철모 (원점 = 이마 위, s = 머리 너비) ----------
+  function drawMorion(c, s) {
+    const lw = Math.max(1.5, s * 0.025);
+    const steel = c.createLinearGradient(-0.6 * s, -1.1 * s, 0.6 * s, 0.1 * s);
+    steel.addColorStop(0, '#f4f6fa'); steel.addColorStop(0.45, '#aab2bd'); steel.addColorStop(1, '#4b525b');
+
+    // 붉은 깃털 장식
+    c.beginPath(); c.ellipse(0.42 * s, -0.78 * s, 0.09 * s, 0.3 * s, 0.7, 0, Math.PI * 2);
+    c.fillStyle = '#b3131b'; c.fill();
+    c.lineWidth = lw * 0.6; c.strokeStyle = 'rgba(0,0,0,0.4)'; c.stroke();
+
+    // 볏(크레스트)
+    c.beginPath();
+    c.ellipse(0, -0.2 * s, 0.4 * s, 0.85 * s, 0, Math.PI, Math.PI * 2);
+    c.closePath();
+    const crest = c.createLinearGradient(-0.3 * s, 0, 0.3 * s, 0);
+    crest.addColorStop(0, '#8d96a1'); crest.addColorStop(0.4, '#e9edf2'); crest.addColorStop(1, '#5d646d');
+    c.fillStyle = crest; c.fill();
+    c.lineWidth = lw; c.strokeStyle = '#2b2f35'; c.stroke();
+
+    // 둥근 투구 몸체
+    c.beginPath();
+    c.ellipse(0, -0.04 * s, 0.46 * s, 0.64 * s, 0, Math.PI, Math.PI * 2);
+    c.closePath();
+    c.fillStyle = steel; c.fill();
+    c.stroke();
+    c.beginPath();
+    c.ellipse(0, -0.2 * s, 0.33 * s, 0.76 * s, 0, Math.PI * 1.08, Math.PI * 1.92);
+    c.lineWidth = lw * 0.7; c.strokeStyle = 'rgba(255,255,255,0.55)'; c.stroke();
+    c.lineWidth = lw; c.strokeStyle = '#2b2f35';
+
+    // 양끝이 위로 솟은 챙
+    c.beginPath();
+    c.moveTo(-0.92 * s, -0.44 * s);
+    c.quadraticCurveTo(-0.55 * s, 0.14 * s, 0, 0.1 * s);
+    c.quadraticCurveTo(0.55 * s, 0.14 * s, 0.92 * s, -0.44 * s);
+    c.quadraticCurveTo(0.5 * s, -0.02 * s, 0, -0.04 * s);
+    c.quadraticCurveTo(-0.5 * s, -0.02 * s, -0.92 * s, -0.44 * s);
+    c.closePath();
+    c.fillStyle = steel; c.fill();
+    c.stroke();
+
+    // 금색 테두리 + 리벳
+    c.beginPath();
+    c.ellipse(0, -0.04 * s, 0.46 * s, 0.1 * s, 0, Math.PI, Math.PI * 2);
+    c.lineWidth = Math.max(2, s * 0.035); c.strokeStyle = '#c9a227'; c.stroke();
+    c.fillStyle = '#f0d77a';
+    for (let i = 0; i < 7; i++) {
+      const x = -0.36 * s + i * 0.12 * s;
+      c.beginPath(); c.arc(x, -0.12 * s, Math.max(1.5, s * 0.022), 0, Math.PI * 2); c.fill();
+    }
+  }
+
+  // ---------- 잉카 방패: 토카푸 문양 사각 방패 + 깃털 술 (R = 방패 반경) ----------
+  function drawIncaShield(c, R) {
+    const w = 1.5 * R, h = 1.7 * R, x = -w / 2, y = -h / 2;
+    const fc = ['#c1121f', '#f7c600', '#2a9d4b'];
+    for (let i = 0; i < 8; i++) {
+      const fx = x + w * (i + 0.5) / 8;
+      c.beginPath(); c.ellipse(fx, y + h + 0.2 * R, 0.08 * R, 0.24 * R, 0, 0, Math.PI * 2);
+      c.fillStyle = fc[i % 3]; c.fill();
+    }
+    rr(c, x, y, w, h, R * 0.08);
+    c.fillStyle = '#efdfbb'; c.fill();
+
+    const cols = 3, rows = 4, pad = R * 0.12;
+    const gw = (w - pad * 2) / cols, gh = (h - pad * 2) / rows;
+    const bases = ['#b5171f', '#1d1d1d', '#e0a800', '#2a6f97'];
+    for (let r = 0; r < rows; r++) {
+      for (let k = 0; k < cols; k++) {
+        const cx = x + pad + k * gw, cy = y + pad + r * gh;
+        const t = (r + k * 2) % 4;
+        c.fillStyle = bases[t];
+        c.fillRect(cx + 1, cy + 1, gw - 2, gh - 2);
+        c.fillStyle = '#f3e6c8';
+        const mx = cx + gw / 2, my = cy + gh / 2, d = Math.min(gw, gh) * 0.3;
+        c.beginPath();
+        if (t === 0) { // 마름모
+          c.moveTo(mx, my - d); c.lineTo(mx + d, my); c.lineTo(mx, my + d); c.lineTo(mx - d, my); c.closePath(); c.fill();
+        } else if (t === 1) { // 체크
+          c.fillRect(mx - d, my - d, d, d); c.fillRect(mx, my, d, d);
+        } else if (t === 2) { // 계단
+          c.moveTo(mx - d, my + d); c.lineTo(mx - d, my); c.lineTo(mx, my); c.lineTo(mx, my - d);
+          c.lineTo(mx + d, my - d); c.lineTo(mx + d, my + d); c.closePath(); c.fill();
+        } else { // X 문양
+          c.lineWidth = d * 0.45; c.strokeStyle = '#f3e6c8';
+          c.moveTo(mx - d, my - d); c.lineTo(mx + d, my + d); c.moveTo(mx + d, my - d); c.lineTo(mx - d, my + d); c.stroke();
+        }
+      }
+    }
+    rr(c, x, y, w, h, R * 0.08);
+    c.lineWidth = R * 0.08; c.strokeStyle = '#5a3310'; c.stroke();
+  }
+
+  // ---------- 스페인 방패: 강철 원형 방패 '로델라' + 부르고뉴 십자 (R = 방패 반경) ----------
+  function drawSpanishShield(c, R) {
+    const g = c.createRadialGradient(-R * 0.35, -R * 0.35, R * 0.1, 0, 0, R);
+    g.addColorStop(0, '#f4f6fa'); g.addColorStop(0.55, '#a9b1bd'); g.addColorStop(1, '#565e69');
+    c.beginPath(); c.arc(0, 0, R, 0, Math.PI * 2);
+    c.fillStyle = g; c.fill();
+    c.lineWidth = R * 0.06; c.strokeStyle = '#2e333a'; c.stroke();
+
+    c.beginPath(); c.arc(0, 0, R * 0.84, 0, Math.PI * 2);
+    c.lineWidth = R * 0.05; c.strokeStyle = '#c9a227'; c.stroke();
+
+    // 부르고뉴 십자 (옹이 달린 붉은 X자)
+    c.save();
+    c.lineCap = 'round';
+    c.strokeStyle = '#b3131b';
+    [1, -1].forEach(dir => {
+      c.lineWidth = R * 0.15;
+      c.beginPath(); c.moveTo(-R * 0.58, -dir * R * 0.58); c.lineTo(R * 0.58, dir * R * 0.58); c.stroke();
+      c.lineWidth = R * 0.08;
+      const ux = 0.7071, uy = dir * 0.7071;   // 막대 방향
+      const px = -uy, py = ux;                // 수직 방향
+      [-0.45, -0.18, 0.18, 0.45].forEach((t, i) => {
+        const bx = ux * t * R, by = uy * t * R, side = i % 2 ? 1 : -1;
+        c.beginPath(); c.moveTo(bx, by); c.lineTo(bx + px * side * R * 0.14, by + py * side * R * 0.14); c.stroke();
+      });
+    });
+    c.restore();
+
+    c.fillStyle = '#e8d27a';
+    for (let i = 0; i < 12; i++) {
+      const a = i * Math.PI / 6;
+      c.beginPath(); c.arc(Math.cos(a) * R * 0.93, Math.sin(a) * R * 0.93, R * 0.045, 0, Math.PI * 2); c.fill();
+    }
+    const boss = c.createRadialGradient(-R * 0.06, -R * 0.06, 1, 0, 0, R * 0.2);
+    boss.addColorStop(0, '#ffffff'); boss.addColorStop(1, '#6b737e');
+    c.beginPath(); c.arc(0, 0, R * 0.2, 0, Math.PI * 2);
+    c.fillStyle = boss; c.fill();
+    c.lineWidth = R * 0.03; c.strokeStyle = '#2e333a'; c.stroke();
+  }
+
+  // ================== 진영 정보 ==================
+  const FACTIONS = {
+    inca: {
+      name: '잉카 제국', color: '#f5b700', core: '#fff3b0', special: '일랴파의 천둥!',
+      hat: drawIncaCrown, shield: drawIncaShield
+    },
+    spain: {
+      name: '스페인 정복군', color: '#e63946', core: '#ffffff', special: '산티아고!',
+      hat: drawMorion, shield: drawSpanishShield
+    }
+  };
+  let p1Faction = 'inca';
+  const factionOf = idx => idx === 0 ? p1Faction : (p1Faction === 'inca' ? 'spain' : 'inca');
+
+  // ================== 상태 ==================
+  const $ = id => document.getElementById(id);
+  const video = $('video');
+  const canvas = $('canvas');
+  const ctx = canvas.getContext('2d');
+
+  let detector = null, stream = null;
+  let modelReady = false, camReady = false, modelFailed = false;
+  let gameState = 'idle';
+  let runId = 0, lastTime = 0, countdownEnd = 0;
+  let players = [], projectiles = [], particles = [];
+
+  function newPlayer(id) {
+    return {
+      id, hp: 100, x: 0, y: 0, active: false,
+      punchState: 'bent', lastPunchTime: 0,
+      squatCount: 0, squatState: 'stand',
+      shield: { x: 0, y: 0, active: false },
+      body: null, head: null
+    };
+  }
+
+  // ================== 사운드 ==================
+  let actx = null;
+  function getAudio() {
+    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    return actx;
+  }
+  function playSound(type) {
+    try {
+      const a = getAudio();
+      if (a.state === 'suspended') a.resume();
+      const osc = a.createOscillator(), gain = a.createGain();
+      osc.connect(gain); gain.connect(a.destination);
+      const t = a.currentTime;
+      let dur = 0.1;
+      if (type === 'shoot') {
+        osc.type = 'square'; osc.frequency.setValueAtTime(400, t); osc.frequency.exponentialRampToValueAtTime(100, t + 0.1);
+        gain.gain.setValueAtTime(0.15, t);
+      } else if (type === 'block') {
+        osc.type = 'sine'; osc.frequency.setValueAtTime(900, t);
+        gain.gain.setValueAtTime(0.25, t);
+      } else if (type === 'hit') {
+        dur = 0.2; osc.type = 'sawtooth'; osc.frequency.setValueAtTime(150, t); osc.frequency.exponentialRampToValueAtTime(50, t + dur);
+        gain.gain.setValueAtTime(0.35, t);
+      } else if (type === 'warn') {
+        dur = 0.25; osc.type = 'triangle'; osc.frequency.setValueAtTime(600, t); osc.frequency.linearRampToValueAtTime(1200, t + dur);
+        gain.gain.setValueAtTime(0.2, t);
+      } else if (type === 'lightning') {
+        dur = 0.5; osc.type = 'square'; osc.frequency.setValueAtTime(110, t); osc.frequency.linearRampToValueAtTime(40, t + dur);
+        gain.gain.setValueAtTime(0.4, t);
+      }
+      gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      osc.start(t); osc.stop(t + dur);
+    } catch (e) { }
+  }
+
+  // ================== 카메라 ==================
+  // 2인용 달리기 게임(앱스 스크립트에서 작동 확인)의 setupCamera / startCamera와
+  // 같은 순서·같은 요청 방식으로 새로 작성
+  function isInIframe() { try { return window.self !== window.top; } catch (e) { return true; } }
+
+  function cameraErrorMessage(err) {
+    const detail = '<br><small style="opacity:.75">상세 정보: ' + (err && err.name) + ' / ' + (err && err.message) + '</small>';
+    switch (err && err.name) {
+      case 'NotAllowedError':
+      case 'PermissionDeniedError':
+        return '<b>브라우저가 카메라를 거부했습니다.</b><br>' +
+          '① 이 페이지 주소창 오른쪽(또는 왼쪽 🔒)에 빨간 X가 있는 카메라 아이콘이 있으면 눌러서 <b>허용</b> → 새로고침<br>' +
+          '② Chrome 주소창에 <b>chrome://settings/content/camera</b> 입력 → "허용되지 않음"에 있는 <b>script.google.com</b>, <b>googleusercontent.com</b> 항목 삭제 → 새로고침<br>' +
+          '③ Windows 설정 → 개인정보 → 카메라 → "데스크톱 앱의 카메라 접근" 켜기' + detail;
+      case 'NotFoundError':
+      case 'DevicesNotFoundError':
+        return '<b>연결된 카메라를 찾지 못했습니다.</b><br>웹캠이 꽂혀 있는지 확인해 주세요.' + detail;
+      case 'NotReadableError':
+      case 'TrackStartError':
+        return '<b>카메라가 다른 프로그램에서 사용 중입니다.</b><br>Zoom, Teams, 카메라 앱, 달리기 게임 탭 등을 닫고 "카메라 다시 시도"를 누르세요.' + detail;
+      default:
+        return '<b>카메라를 켜지 못했습니다.</b>' + detail;
+    }
+  }
+
+  // 브라우저에 저장된 카메라 권한 상태 확인: granted(허용) / denied(차단 저장됨) / prompt(물어볼 예정)
+  async function getCameraPermissionState() {
+    try {
+      if (!navigator.permissions || !navigator.permissions.query) return 'unknown';
+      const r = await navigator.permissions.query({ name: 'camera' });
+      return r.state;
+    } catch (e) { return 'unknown'; }
+  }
+
+  function fillCameraList(videoDevices, selectedId) {
+    const cameraSelect = $('camera-select');
+    cameraSelect.innerHTML = '';
+    if (videoDevices.length === 0) {
+      cameraSelect.innerHTML = '<option value="">카메라를 찾지 못했어요</option>';
+      return;
+    }
+    videoDevices.forEach((device, index) => {
+      const option = document.createElement('option');
+      option.value = device.deviceId;
+      option.textContent = device.label || `카메라 ${index + 1}`;
+      if (device.deviceId === selectedId) option.selected = true;
+      cameraSelect.appendChild(option);
+    });
+  }
+
+  // 달리기 게임과 동일: 카메라 목록 먼저 표시 → 첫 번째 카메라 켜기
+  // autoStart=true  : 이미 "허용"이 저장돼 있으면 달리기 게임처럼 바로 켜기
+  // autoStart=false : 버튼 클릭으로 요청 (클릭해서 요청해야 허용 팝업이 확실히 뜸)
+  async function setupCamera(autoStart) {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showError('<b>이 페이지에서는 카메라 기능을 쓸 수 없습니다.</b><br>최신 Chrome으로 https:// 주소에서 열어 주세요.');
+      setCamStatus('err', '카메라 사용 불가');
+      return;
+    }
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const videoDevices = devices.filter(device => device.kind === 'videoinput');
+    fillCameraList(videoDevices, null);
+
+    if (autoStart) {
+      const state = await getCameraPermissionState();
+      if (state !== 'granted') {
+        // 아직 허용 전: 자동 요청하지 않고 버튼을 보여줌
+        const btn = $('cam-btn');
+        btn.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = '📷 카메라 켜기 (누르면 허용 팝업이 떠요)';
+        setCamStatus('wait', '카메라 켜기 버튼을 눌러 주세요');
+        updateStartButton();
+        return;
+      }
+    }
+    // 선택칸에 고른 카메라가 있으면 그것, 없으면 기본 카메라
+    const chosen = $('camera-select').value || null;
+    await startCamera(chosen);
+  }
+
+  async function startCamera(deviceId) {
+    hideError();
+    setCamStatus('wait', '카메라 연결 중');
+    $('cam-btn').style.display = 'none';
+    try {
+      if (video.srcObject) video.srcObject.getTracks().forEach(track => track.stop());
+
+      // 달리기 게임과 똑같은 요청
+      let newStream;
+      try {
+        newStream = await navigator.mediaDevices.getUserMedia({
+          video: { deviceId: deviceId ? { exact: deviceId } : undefined, width: 1280, height: 720 }
+        });
+      } catch (e) {
+        if (e.name !== 'OverconstrainedError') throw e;
+        newStream = await navigator.mediaDevices.getUserMedia({ video: true });
+      }
+
+      stream = newStream;
+      video.srcObject = stream;
+      await new Promise(resolve => {
+        if (video.readyState >= 1) resolve();
+        else video.onloadedmetadata = () => resolve();
+      });
+      try { await video.play(); } catch (e) { }
+      canvas.width = video.videoWidth || 1280;
+      canvas.height = video.videoHeight || 720;
+
+      camReady = true;
+      setCamStatus('ok', '카메라 연결됨');
+
+      // 권한을 받은 뒤에는 카메라 이름까지 보이도록 목록 새로 채우기
+      const track = stream.getVideoTracks()[0];
+      const currentId = track && track.getSettings().deviceId;
+      const devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+      fillCameraList(devices, currentId);
+    } catch (error) {
+      console.error('카메라 접근 오류:', error);
+      camReady = false;
+      stream = null;
+      const state = await getCameraPermissionState();
+      const policy = document.permissionsPolicy || document.featurePolicy;
+      const policyBlocks = !!(policy && policy.allowsFeature && !policy.allowsFeature('camera'));
+      let extra = '';
+      if (policyBlocks) {
+        extra += '<br><br>🔎 <b>진단 결과: 이 게임을 감싸고 있는 바깥 창이 카메라 사용을 허락하지 않았습니다.</b> ' +
+          '게임 코드로는 풀 수 없는 설정이에요. 게임을 다른 사이트에 넣지 말고 앱스 스크립트 주소(…/exec)를 주소창에 직접 입력해서 여세요.';
+      }
+      if (error.name === 'NotAllowedError' && state === 'denied') {
+        extra += '<br><br>🔎 <b>진단 결과: 이 페이지는 브라우저에 "카메라 차단"으로 저장되어 있습니다.</b> ' +
+          '팝업이 안 뜨고 바로 거부되는 이유예요. 코드 문제가 아니라 저장된 설정 문제라, 위 ①이나 ②로 차단을 풀면 바로 켜집니다. ' +
+          '(시크릿 창 <b>Ctrl+Shift+N</b>에서 열면 차단 기록 없이 허용 팝업이 다시 떠요.)';
+      } else if (error.name === 'NotAllowedError' && state === 'prompt') {
+        extra += '<br><br>🔎 <b>진단 결과: 아직 허용/차단을 고르지 않은 상태입니다.</b> 아래 버튼을 누르고, 팝업이 뜨면 <b>사이트에 있는 동안 허용</b>을 누르세요.';
+      }
+      showError(cameraErrorMessage(error) + extra + '<br><small style="opacity:.75">권한 상태: ' + state + ' / 창 정책: ' + (policyBlocks ? '카메라 차단' : '허용 또는 확인 불가') + '</small>');
+      setCamStatus('err', '카메라 실패');
+      const btn = $('cam-btn');
+      btn.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = '📷 카메라 다시 시도';
+    }
+    updateStartButton();
+  }
+
+  // ================== AI 모델 ==================
+  async function loadModel() {
+    try {
+      if (typeof tf === 'undefined' || typeof poseDetection === 'undefined') throw new Error('라이브러리 로딩 실패');
+      try { await tf.setBackend('webgl'); } catch (e) { }
+      await tf.ready();
+      detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
+        modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
+        enableTracking: true,
+        trackerType: poseDetection.TrackerType.BoundingBox
+      });
+      modelReady = true;
+      $('model-dot').className = 'dot ok';
+      $('model-text').textContent = 'AI 모델 준비됨';
+    } catch (err) {
+      console.error(err);
+      $('model-dot').className = 'dot err';
+      $('model-text').textContent = 'AI 모델 실패'; modelFailed = true;
+      showError('<b>AI 모델을 불러오지 못했습니다.</b><br>인터넷 연결을 확인하고 새로고침해 주세요. ' +
+        '회사·학교 네트워크라면 cdn.jsdelivr.net, tfhub.dev, kaggle.com 접속이 막혀 있을 수 있어요.', true);
+    }
+    updateStartButton();
+  }
+
+  // ================== 메뉴 ==================
+  function showError(html, append) {
+    const b = $('error-box');
+    b.innerHTML = (append && b.style.display === 'block') ? b.innerHTML + '<hr style="border-color:rgba(255,255,255,.2)">' + html : html;
+    b.style.display = 'block';
+  }
+  function hideError() { $('error-box').style.display = 'none'; }
+  function setCamStatus(kind, text) { $('cam-dot').className = 'dot ' + kind; $('cam-text').textContent = text; }
+  function updateStartButton() {
+    const btn = $('start-btn');
+    btn.disabled = !(modelReady && camReady);
+    btn.textContent = modelFailed ? 'AI 모델 로딩 실패 (새로고침)' : !modelReady ? 'AI 모델 준비 중...' : !camReady ? '먼저 카메라를 켜 주세요' : '게임 시작';
+  }
+
+  function selectFaction(f) {
+    p1Faction = f;
+    ['inca', 'spain'].forEach(k => {
+      const card = $('pick-' + k);
+      const isP1 = k === f;
+      card.classList.toggle('p1', isP1);
+      card.setAttribute('aria-pressed', isP1 ? 'true' : 'false');
+      card.querySelector('.badge').textContent = isP1 ? 'P1 (나)' : 'P2 (상대)';
+    });
+  }
+
+  function drawPreviews() {
+    ['inca', 'spain'].forEach(k => {
+      const cv = $('preview-' + k), c = cv.getContext('2d');
+      c.clearRect(0, 0, cv.width, cv.height);
+      // 머리 실루엣
+      c.fillStyle = 'rgba(255,255,255,0.12)';
+      c.beginPath(); c.ellipse(95, 150, 42, 52, 0, 0, Math.PI * 2); c.fill();
+      c.save(); c.translate(95, 118); FACTIONS[k].hat(c, 84); c.restore();
+      c.save(); c.translate(225, 105); FACTIONS[k].shield(c, 55); c.restore();
+    });
+  }
+
+  let msgTimer = null;
+  function showCenter(text, hideAfterMs) {
+    const m = $('center-msg');
+    m.textContent = text; m.style.display = 'block';
+    clearTimeout(msgTimer);
+    if (hideAfterMs) msgTimer = setTimeout(() => { m.style.display = 'none'; }, hideAfterMs);
+  }
+  function hideCenter() { clearTimeout(msgTimer); $('center-msg').style.display = 'none'; }
+
+  function buildChargeMeters() {
+    ['p1-charge', 'p2-charge'].forEach(id => { $(id).innerHTML = '<i></i>'.repeat(CONFIG.SQUATS_FOR_SPECIAL); });
+  }
+
+  // ================== 게임 흐름 ==================
+  function startGame() {
+    if (!detector || !stream) return;
+    getAudio().resume();
+
+    players = [newPlayer(0), newPlayer(1)];
+    players[0].x = canvas.width * 0.75;   // 원본 좌표 기준 오른쪽 = 거울 화면 왼쪽(P1)
+    players[1].x = canvas.width * 0.25;
+    projectiles = []; particles = [];
+
+    [0, 1].forEach(i => {
+      const f = FACTIONS[factionOf(i)];
+      const el = $(`p${i + 1}-name`);
+      el.textContent = f.name; el.style.color = f.color;
+    });
+
+    $('menu').style.display = 'none';
+    $('result').style.display = 'none';
+    $('game-ui').style.display = 'block';
+    $('center-line').style.display = 'block';
+    updateUI();
+
+    gameState = 'countdown';
+    countdownEnd = performance.now() + CONFIG.COUNTDOWN_MS;
+    lastTime = performance.now();
+    const myRun = ++runId;
+    requestAnimationFrame(() => loop(myRun));
+  }
+
+  function backToMenu() {
+    runId++;
+    gameState = 'idle';
+    hideCenter();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    $('result').style.display = 'none';
+    $('game-ui').style.display = 'none';
+    $('center-line').style.display = 'none';
+    $('menu').style.display = 'block';
+  }
+
+  function endGame() {
+    gameState = 'over';
+    const d0 = players[0].hp <= 0, d1 = players[1].hp <= 0;
+    const winner = d0 && d1 ? null : d1 ? 0 : 1;
+    const h = $('result-text');
+    if (winner === null) { h.textContent = '무승부!'; h.style.color = '#fff'; }
+    else { const f = FACTIONS[factionOf(winner)]; h.textContent = `${f.name} 승리!`; h.style.color = f.color; }
+    $('result').style.display = 'block';
+    hideCenter();
+    playSound('lightning');
+  }
+
+  async function loop(myRun) {
+    if (myRun !== runId || (gameState !== 'countdown' && gameState !== 'playing')) return;
+    const now = performance.now();
+    const dt = Math.min(0.1, (now - lastTime) / 1000);
+    lastTime = now;
+
+    let poses = [];
+    try {
+      if (video.readyState >= 2) poses = await detector.estimatePoses(video, { maxPoses: 2, flipHorizontal: false });
+    } catch (e) { console.error(e); }
+    if (myRun !== runId) return;
+
+    assignPoses(poses, gameState === 'playing', now);
+
+    if (gameState === 'countdown') {
+      const left = countdownEnd - now;
+      if (left > 0) showCenter(String(Math.ceil(left / 1000)));
+      else { gameState = 'playing'; showCenter('FIGHT!', 800); }
+    } else {
+      updateProjectiles(dt, now);
+      checkBoundaries(dt);
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    draw(dt, now);
+    updateUI();
+
+    if (gameState === 'playing' && (players[0].hp <= 0 || players[1].hp <= 0)) { endGame(); return; }
+    requestAnimationFrame(() => loop(myRun));
+  }
+
+  // ================== 인식 & 배정 ==================
+  function assignPoses(poses, canAct, now) {
+    players.forEach(p => { p.active = false; });
+    const valid = poses
+      .map(pose => ({ pose, nose: pose.keypoints.find(k => k.name === 'nose') }))
+      .filter(o => {
+        if (!o.nose || o.nose.score < CONFIG.KP_MIN) return false;
+        const avg = o.pose.keypoints.reduce((s, k) => s + k.score, 0) / o.pose.keypoints.length;
+        return avg > 0.2;
+      });
+
+    if (valid.length >= 2) {
+      valid.sort((a, b) => b.nose.x - a.nose.x);
+      processPlayer(players[0], valid[0].pose, 0, canAct, now);
+      processPlayer(players[1], valid[1].pose, 1, canAct, now);
+    } else if (valid.length === 1) {
+      const x = valid[0].nose.x;
+      const idx = Math.abs(x - players[0].x) <= Math.abs(x - players[1].x) ? 0 : 1;
+      processPlayer(players[idx], valid[0].pose, idx, canAct, now);
+    }
+  }
+
+  // 머리 위치·크기·기울기 계산 → 모자 씌울 자리
+  function computeHead(ok) {
+    const le = ok('left_eye'), re = ok('right_eye'), lear = ok('left_ear'), rear = ok('right_ear');
+    const nose = ok('nose'), ls = ok('left_shoulder'), rs = ok('right_shoulder');
+    let w = null, angle = 0, cx, cy;
+    if (lear && rear) w = dist(lear, rear) * 1.15;
+    else if (le && re) w = dist(le, re) * 2.6;
+    else if (ls && rs) w = dist(ls, rs) * 0.5;
+    if (!w) w = 100;
+    w = Math.max(30, Math.min(400, w)) * CONFIG.HAT_SCALE;
+
+    if (le && re) {
+      angle = Math.atan2(le.y - re.y, le.x - re.x);
+      if (angle > Math.PI / 2) angle -= Math.PI;
+      if (angle < -Math.PI / 2) angle += Math.PI;
+      cx = (le.x + re.x) / 2; cy = (le.y + re.y) / 2;
+    } else if (nose) {
+      cx = nose.x; cy = nose.y - w * 0.15;
+    } else return null;
+
+    const up = 0.5 * w;
+    return { x: cx + Math.sin(angle) * up, y: cy - Math.cos(angle) * up, w, angle };
+  }
+
+  function processPlayer(player, pose, idx, canAct, now) {
+    const kp = {}; pose.keypoints.forEach(k => { kp[k.name] = k; });
+    const ok = n => (kp[n] && kp[n].score > CONFIG.KP_MIN) ? kp[n] : null;
+    player.active = true;
+
+    const nose = ok('nose');
+    if (nose) { player.x = nose.x; player.y = nose.y; }
+
+    // 머리(모자) - 떨림 줄이기 위해 부드럽게 보간
+    const h = computeHead(ok);
+    if (h) {
+      if (!player.head) player.head = h;
+      else {
+        const k = 0.45, ph = player.head;
+        ph.x += (h.x - ph.x) * k; ph.y += (h.y - ph.y) * k;
+        ph.w += (h.w - ph.w) * k; ph.angle += (h.angle - ph.angle) * k;
+      }
+    }
+
+    // 몸통 히트박스
+    const pts = ['nose', 'left_shoulder', 'right_shoulder', 'left_hip', 'right_hip'].map(ok).filter(Boolean);
+    if (pts.length >= 2) {
+      const xs = pts.map(k => k.x), ys = pts.map(k => k.y);
+      player.body = { x1: Math.min(...xs) - 40, x2: Math.max(...xs) + 40, y1: Math.min(...ys) - 60, y2: Math.max(...ys) + 20 };
+    }
+
+    // 방패: 오른손목
+    const rWrist = ok('right_wrist');
+    if (rWrist) player.shield = { x: rWrist.x, y: rWrist.y, active: true };
+    else player.shield.active = false;
+
+    // 장풍: 왼팔
+    const ls = ok('left_shoulder'), le = ok('left_elbow'), lw = ok('left_wrist');
+    if (ls && le && lw) {
+      const armLen = dist(ls, le) + dist(le, lw);
+      const ratio = armLen > 0 ? dist(ls, lw) / armLen : 0;
+      if (ratio < 0.6) player.punchState = 'bent';
+      else if (ratio > 0.85 && player.punchState === 'bent') {
+        player.punchState = 'extended';
+        if (canAct && now - player.lastPunchTime > CONFIG.PUNCH_COOLDOWN) {
+          shootFireball(lw, idx);
+          player.lastPunchTime = now;
+        }
+      }
+    }
+
+    // 스쿼트
+    const ratios = ['left', 'right'].map(s => {
+      const hp = ok(s + '_hip'), kn = ok(s + '_knee'), an = ok(s + '_ankle');
+      if (!hp || !kn || !an) return null;
+      const leg = an.y - hp.y;
+      if (leg < 40) return null;
+      return (kn.y - hp.y) / leg;
+    }).filter(r => r !== null);
+
+    if (ratios.length) {
+      const r = ratios.reduce((s, v) => s + v, 0) / ratios.length;
+      if (r < 0.25) player.squatState = 'squat';
+      else if (r > 0.4 && player.squatState === 'squat') {
+        player.squatState = 'stand';
+        if (canAct) {
+          player.squatCount++;
+          if (player.squatCount >= CONFIG.SQUATS_FOR_SPECIAL) {
+            triggerLightning(idx, now);
+            player.squatCount = 0;
+          }
+        }
+      }
+    }
+  }
+
+  // ================== 공격 ==================
+  function shootFireball(wrist, idx) {
+    playSound('shoot');
+    projectiles.push({
+      type: 'fireball', owner: idx, x: wrist.x, y: wrist.y,
+      vx: idx === 0 ? -CONFIG.FIREBALL_SPEED : CONFIG.FIREBALL_SPEED, vy: 0,
+      radius: CONFIG.FIREBALL_RADIUS
+    });
+  }
+
+  function triggerLightning(attackerIdx, now) {
+    const target = players[1 - attackerIdx];
+    playSound('warn');
+    showCenter(FACTIONS[factionOf(attackerIdx)].special, 900);
+    projectiles.push({
+      type: 'lightning', owner: attackerIdx, phase: 'warn',
+      x: target.x, y: 0, vx: 0, vy: 0,
+      width: CONFIG.LIGHTNING_W, height: CONFIG.LIGHTNING_H,
+      strikeAt: now + CONFIG.LIGHTNING_WARN
+    });
+  }
+
+  function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+  function hitsBody(p, b) {
+    if (!b) return false;
+    const isL = p.type === 'lightning';
+    const half = isL ? p.width / 2 : p.radius;
+    const top = isL ? p.y - p.height : p.y - p.radius;
+    const bottom = isL ? p.y : p.y + p.radius;
+    return p.x + half > b.x1 && p.x - half < b.x2 && bottom > b.y1 && top < b.y2;
+  }
+
+  function damage(idx, amount, shake) {
+    players[idx].hp = Math.max(0, players[idx].hp - amount);
+    if (shake) {
+      const f = $(`p${idx + 1}-frame`);
+      f.classList.remove('shake'); void f.offsetWidth; f.classList.add('shake');
+    }
+  }
+
+  function updateProjectiles(dt, now) {
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      const p = projectiles[i];
+      const targetIdx = 1 - p.owner;
+      const target = players[targetIdx];
+
+      if (p.type === 'lightning' && p.phase === 'warn') {
+        if (target.active) p.x = target.x;
+        if (now >= p.strikeAt) {
+          p.phase = 'strike'; p.y = 0; p.vy = CONFIG.LIGHTNING_SPEED;
+          playSound('lightning');
+        }
+        continue;
+      }
+
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      if (p.x < -150 || p.x > canvas.width + 150 || p.y - (p.height || 0) > canvas.height + 50) {
+        projectiles.splice(i, 1); continue;
+      }
+      if (!target.active) continue;
+
+      if (target.shield.active) {
+        const reach = CONFIG.SHIELD_RADIUS + (p.type === 'fireball' ? p.radius : p.width / 2);
+        if (dist(p, target.shield) < reach) {
+          playSound('block');
+          explode(p.x, p.y, factionOf(targetIdx) === 'inca' ? '#f5b700' : '#dfe4ea', 14);
+          projectiles.splice(i, 1);
+          continue;
+        }
+      }
+
+      if (hitsBody(p, target.body)) {
+        playSound('hit');
+        damage(targetIdx, p.type === 'lightning' ? CONFIG.LIGHTNING_DMG : CONFIG.FIREBALL_DMG, true);
+        explode(p.x, p.y, p.type === 'lightning' ? '#ffd23f' : '#ffffff', p.type === 'lightning' ? 30 : 16);
+        projectiles.splice(i, 1);
+      }
+    }
+  }
+
+  function checkBoundaries(dt) {
+    const c = canvas.width / 2;
+    const p1Out = players[0].active && players[0].x < c - CONFIG.LINE_MARGIN;
+    const p2Out = players[1].active && players[1].x > c + CONFIG.LINE_MARGIN;
+    if (p1Out) damage(0, CONFIG.LINE_DMG_PER_SEC * dt, false);
+    if (p2Out) damage(1, CONFIG.LINE_DMG_PER_SEC * dt, false);
+    $('p1-warn').style.display = p1Out ? 'block' : 'none';
+    $('p2-warn').style.display = p2Out ? 'block' : 'none';
+  }
+
+  function explode(x, y, color, n) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, s = 200 + Math.random() * 500;
+      particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 1, color });
+    }
+  }
+
+  // ================== 그리기 ==================
+  function draw(dt, now) {
+    // 모자
+    players.forEach((p, i) => {
+      if (!p.active || !p.head) return;
+      ctx.save();
+      ctx.translate(p.head.x, p.head.y);
+      ctx.rotate(p.head.angle);
+      FACTIONS[factionOf(i)].hat(ctx, p.head.w);
+      ctx.restore();
+    });
+
+    // 방패
+    players.forEach((p, i) => {
+      if (!p.active || !p.shield.active) return;
+      ctx.save();
+      ctx.translate(p.shield.x, p.shield.y);
+      ctx.globalAlpha = 0.92;
+      FACTIONS[factionOf(i)].shield(ctx, CONFIG.SHIELD_RADIUS);
+      ctx.restore();
+    });
+
+    // 투사체
+    projectiles.forEach(p => {
+      if (p.type === 'fireball') {
+        const f = FACTIONS[factionOf(p.owner)];
+        ctx.save();
+        ctx.shadowBlur = 25; ctx.shadowColor = f.color;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        ctx.fillStyle = f.color; ctx.fill();
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.radius * 0.45, 0, Math.PI * 2);
+        ctx.fillStyle = f.core; ctx.fill();
+        ctx.restore();
+      } else if (p.phase === 'warn') {
+        const blink = Math.floor(now / 120) % 2 === 0;
+        const target = players[1 - p.owner];
+        ctx.save();
+        ctx.setLineDash([10, 8]);
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = blink ? '#ffd23f' : 'rgba(255,210,63,0.4)';
+        ctx.beginPath(); ctx.arc(p.x, target.y - 20, 90, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(p.x, 0); ctx.lineTo(p.x, Math.max(0, target.y - 110)); ctx.stroke();
+        ctx.restore();
+      } else {
+        ctx.save();
+        ctx.shadowBlur = 35; ctx.shadowColor = '#ffd23f';
+        ctx.strokeStyle = '#fff6c2'; ctx.lineWidth = 10; ctx.lineJoin = 'round';
+        ctx.beginPath();
+        const segs = 6, top = Math.max(0, p.y - p.height * 3);
+        ctx.moveTo(p.x, top);
+        for (let s = 1; s <= segs; s++) {
+          const yy = top + (p.y - top) * (s / segs);
+          const xx = p.x + (s === segs ? 0 : (s % 2 ? 1 : -1) * p.width / 2);
+          ctx.lineTo(xx, yy);
+        }
+        ctx.stroke();
+        ctx.lineWidth = 4; ctx.strokeStyle = '#ffd23f'; ctx.stroke();
+        ctx.restore();
+      }
+    });
+
+    // 파티클
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const pt = particles[i];
+      pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.life -= 2 * dt;
+      if (pt.life <= 0) { particles.splice(i, 1); continue; }
+      ctx.globalAlpha = pt.life;
+      ctx.fillStyle = pt.color;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 6, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function updateUI() {
+    players.forEach((p, i) => {
+      const n = i + 1, hp = Math.max(0, p.hp);
+      const bar = $(`p${n}-hp`);
+      bar.style.width = hp + '%';
+      bar.style.background = hp > 60 ? '#4ade80' : hp > 30 ? '#fbbf24' : '#ef4444';
+      $(`p${n}-seen`).textContent = p.active ? '' : '인식 안 됨';
+      [...$(`p${n}-charge`).children].forEach((el, k) => el.classList.toggle('on', k < p.squatCount));
+    });
+  }
+
+  // ================== 이벤트 ==================
+  $('pick-inca').addEventListener('click', () => selectFaction('inca'));
+  $('pick-spain').addEventListener('click', () => selectFaction('spain'));
+  $('cam-btn').addEventListener('click', () => setupCamera(false));
+  $('camera-select').addEventListener('change', e => startCamera(e.target.value));
+  $('start-btn').addEventListener('click', startGame);
+  $('restart-btn').addEventListener('click', startGame);
+  $('to-menu-btn').addEventListener('click', backToMenu);
+  window.addEventListener('keydown', e => { if (e.key === 'Escape') backToMenu(); });
+
+  buildChargeMeters();
+  selectFaction('inca');
+  drawPreviews();
+  updateStartButton();
+  // 달리기 게임과 동일한 시작 순서: 카메라 → AI 모델
+  async function init() {
+    try { await setupCamera(true); } catch (e) { console.error(e); showError(cameraErrorMessage(e)); setCamStatus('err', '카메라 실패'); }
+    await loadModel();
+  }
+  init();
+  </script>
+</body>
+</html>
