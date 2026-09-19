@@ -78,13 +78,21 @@
     .tips h3 { font-family: var(--display); font-weight: 400; font-size: 22px; margin: 0 0 8px; color: var(--text); }
     .tips p { margin: 0; }
 
-    .admin-link { text-align: right; margin-top: 18px; }
-    .admin-link a { color: #6f6897; font-size: 14px; }
+    .topbar { display: flex; justify-content: flex-end; margin-bottom: 18px; }
+    .teacher-btn {
+      display: inline-flex; align-items: center; gap: 8px; text-decoration: none;
+      font-size: 18px; font-weight: 700; color: #ffe066;
+      padding: 10px 20px; border: 2px solid #ffe066; border-radius: 999px;
+      background: rgba(255, 224, 102, 0.08); transition: background .15s;
+    }
+    .teacher-btn:hover { background: rgba(255, 224, 102, 0.18); }
+    .teacher-btn:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
     @media (prefers-reduced-motion: reduce) { .card { transition: none; } a.card:hover { transform: none; } }
   </style>
 </head>
 <body>
   <main>
+    <div class="topbar"><a class="teacher-btn" href="admin/">🔑 선생님 메뉴</a></div>
     <header>
       <h1>모션 게임 <span class="glow">아케이드</span></h1>
       <p class="intro">카메라 앞에서 몸을 움직여 즐기는 게임 모음이에요. 하고 싶은 게임을 눌러 시작하세요.</p>
@@ -99,7 +107,6 @@
       <p>📏 발까지 인식하는 게임은 발끝까지 화면에 보이도록 카메라에서 2.5~3m 떨어져 서세요.</p>
       <p>💡 얼굴 쪽이 밝게 비치는 곳이 인식이 잘 돼요. 창문을 등지고 서지 마세요.</p>
     </section>
-    <p class="admin-link"><a href="admin/">선생님 메뉴</a></p>
   </main>
 
   <script>
